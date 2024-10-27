@@ -41,12 +41,14 @@ model Route {
 }
 
 model Campaign {
-  id      String @id @default(uuid())
-  name    String
-  userId  String
-  user    User   @relation(fields: [userId], references: [id])
-  routeId String
-  route   Route  @relation(fields: [routeId], references: [id])
+  id       String   @id @default(uuid())
+  name     String
+  userId   String
+  user     User     @relation(fields: [userId], references: [id])
+  routeId  String
+  route    Route    @relation(fields: [routeId], references: [id])
+  Seller   Seller[] @relation("CampaignToSeller")
+  sellerId String?
 }
 
 model Lead {
@@ -61,4 +63,11 @@ model Lead {
   sub2      String
   sub3      String
   sub4      String
+}
+
+model Seller {
+  id        String     @id @default(uuid())
+  name      String
+  apiKey    String
+  campaigns Campaign[] @relation("CampaignToSeller")
 }
