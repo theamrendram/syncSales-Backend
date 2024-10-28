@@ -41,14 +41,33 @@ model Route {
 }
 
 model Campaign {
-  id       String   @id @default(uuid())
-  name     String
-  userId   String
-  user     User     @relation(fields: [userId], references: [id])
-  routeId  String
-  route    Route    @relation(fields: [routeId], references: [id])
-  Seller   Seller[] @relation("CampaignToSeller")
-  sellerId String?
+  id              String           @id @default(uuid())
+  name            String
+  userId          String
+  campId          String
+  user            User             @relation(fields: [userId], references: [id])
+  routeId         String
+  route           Route            @relation(fields: [routeId], references: [id])
+  status          Status
+  campaignSellers CampaignSeller[]
+}
+
+model Seller {
+  id              String           @id @default(uuid())
+  name            String
+  apiKey          String
+  campaignSellers CampaignSeller[]
+}
+
+model CampaignSeller {
+  id         String   @id @default(uuid())
+  campaignId String
+  sellerId   String
+  assignedAt DateTime @default(now())
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+  seller     Seller   @relation(fields: [sellerId], references: [id])
+
+  @@unique([campaignId, sellerId])
 }
 
 model Lead {
@@ -65,9 +84,7 @@ model Lead {
   sub4      String
 }
 
-model Seller {
-  id        String     @id @default(uuid())
-  name      String
-  apiKey    String
-  campaigns Campaign[] @relation("CampaignToSeller")
+enum Status {
+  active
+  inactive
 }
