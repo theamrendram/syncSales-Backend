@@ -23,6 +23,7 @@ model User {
   role        String     @default("admin")
   routes      Route[]
   campaigns   Campaign[]
+  Lead        Lead[]
 }
 
 model Route {
@@ -38,50 +39,50 @@ model Route {
   userId      String
   user        User       @relation(fields: [userId], references: [id])
   campaigns   Campaign[]
+  Lead        Lead[]
 }
 
 model Campaign {
-  id              String           @id @default(uuid())
-  name            String
-  userId          String
-  campId          String
-  user            User             @relation(fields: [userId], references: [id])
-  routeId         String
-  route           Route            @relation(fields: [routeId], references: [id])
-  status          Status
-  campaignSellers CampaignSeller[]
+  id       String   @id @default(uuid())
+  name     String
+  userId   String
+  campId   String
+  user     User     @relation(fields: [userId], references: [id])
+  routeId  String
+  route    Route    @relation(fields: [routeId], references: [id])
+  seller   Seller[] @relation("CampaignToSeller")
+  sellerId String
+  status   Status   @default(active)
+  Lead     Lead[]
+
+  @@unique([sellerId, campId])
 }
 
 model Seller {
-  id              String           @id @default(uuid())
-  name            String
-  apiKey          String
-  campaignSellers CampaignSeller[]
-}
-
-model CampaignSeller {
-  id         String   @id @default(uuid())
-  campaignId String
-  sellerId   String
-  assignedAt DateTime @default(now())
-  campaign   Campaign @relation(fields: [campaignId], references: [id])
-  seller     Seller   @relation(fields: [sellerId], references: [id])
-
-  @@unique([campaignId, sellerId])
+  id        String     @id @default(uuid())
+  name      String
+  apiKey    String     @unique
+  campaigns Campaign[] @relation("CampaignToSeller")
 }
 
 model Lead {
-  id        String @id @default(uuid())
-  firstName String
-  lastName  String
-  phone     String
-  email     String
-  address   String
-  status    String
-  sub1      String
-  sub2      String
-  sub3      String
-  sub4      String
+  id         String   @id @default(uuid())
+  firstName  String
+  lastName   String?
+  phone      String
+  email      String?
+  address    String?
+  status     String
+  sub1       String?
+  sub2       String?
+  sub3       String?
+  sub4       String?
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  routeId    String
+  route      Route    @relation(fields: [routeId], references: [id])
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
 }
 
 enum Status {

@@ -7,6 +7,7 @@ const userRoute = require("./routes/user.route");
 const webhookRoute = require("./routes/webhook.route");
 const sellerRoute = require("./routes/seller.route");
 const campaignRoute = require("./routes/campaign.route");
+const leadsRoute = require("./routes/lead.route");
 dotenv.config();
 
 app.get("/", (req, res) => {
@@ -21,6 +22,7 @@ app.use("/api/user", userRoute);
 app.use("/api/webhook", webhookRoute);
 app.use("/api/seller", sellerRoute);
 app.use("/api/campaign", campaignRoute);
+app.use("/api/lead", leadsRoute);
 
 app.get("/test", (req, res) => {
   res.send("test route");

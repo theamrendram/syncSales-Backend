@@ -7,7 +7,6 @@ const getCampaigns = async (req, res) => {
       include: {
         user: true, // Include related User data
         route: true, // Include related Route data
-        Seller: true, // Include related Sellers
       },
     });
     console.log(campaigns);
@@ -29,7 +28,7 @@ const getCampaignById = async (req, res) => {
       include: {
         user: false, // Include related User data
         route: true, // Include related Route data
-        Seller: true, // Include related Sellers
+        seller: true, // Include related Sellers
       },
     });
     if (!campaign) {
@@ -112,5 +111,5 @@ module.exports = {
   getCampaignById,
   addCampaign,
   editCampaign,
-  deleteCampaign
+  deleteCampaign,
 };
