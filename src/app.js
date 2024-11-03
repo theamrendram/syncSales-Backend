@@ -17,12 +17,12 @@ app.get("/", (req, res) => {
 app.use(express.json());
 app.use(cors());
 
-app.use("/api/route", routeRoute);
-app.use("/api/user", userRoute);
-app.use("/api/webhook", webhookRoute);
-app.use("/api/seller", sellerRoute);
-app.use("/api/campaign", campaignRoute);
-app.use("/api/lead", leadsRoute);
+app.use("/api/v1/route", routeRoute);
+app.use("/api/v1/user", userRoute);
+app.use("/api/v1/webhook", webhookRoute);
+app.use("/api/v1/seller", sellerRoute);
+app.use("/api/v1/campaign", campaignRoute);
+app.use("/api/v1/lead", leadsRoute);
 
 app.get("/test", (req, res) => {
   res.send("test route");

@@ -2,8 +2,14 @@ const { PrismaClient } = require("@prisma/client");
 const prismaClient = new PrismaClient();
 
 const getLeads = async (req, res) => {
-  const leads = await prismaClient.lead.findMany();
-  res.json(leads);
+  try {
+    const leads = await prismaClient.lead.findMany();
+    res.json(leads);
+  } catch (error) {
+    res
+      .status(500)
+      .json({ error: "Unable to fetch leads", details: error.message });
+  }
 };
 
 const addLead = async (req, res) => {
@@ -13,7 +19,6 @@ const addLead = async (req, res) => {
     phone,
     email,
     address,
-    status,
     sub1,
     sub2,
     sub3,
@@ -24,26 +29,28 @@ const addLead = async (req, res) => {
 
   console.log("body", req.body);
   try {
-    const user = await prismaClient.user.findUnique({
+    console.log("apiKey", apiKey);
+    const seller = await prismaClient.seller.findUnique({
       where: {
         apiKey,
       },
     });
-    if (!user) {
+    if (!seller) {
       throw new Error("Invalid API key");
     }
 
-    console.log("user", user);
-    const camp = await prismaClient.campaign.findFirst({
+    const { id: sellerId } = seller;
+    const campaign = await prismaClient.campaign.findFirst({
       where: {
+        sellerId,
         campId,
-        userId: user.id,
       },
     });
-    if (!camp) {
-      throw new Error("Campaign not found");
+
+    if (!campaign) {
+      throw new Error("Invalid campaign ID");
     }
-    console.log("camp", camp);
+
     const lead = await prismaClient.lead.create({
       data: {
         firstName,
@@ -51,20 +58,21 @@ const addLead = async (req, res) => {
         phone,
         email,
         address,
-        status,
+        status: "pending", // Explicitly set status to pending if that's the initial status
         sub1,
         sub2,
         sub3,
         sub4,
-        campaignId: camp.id,
-        routeId: camp.routeId,
-        userId: user.id,
+        campaignId: campaign.id, // Corrected to match the model field name
+        routeId: campaign.routeId, // Retrieved from campaign
+        userId: campaign.userId, // Set userId as required by the Lead model
       },
     });
-    console.log(lead);
     res.status(201).json(lead);
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    res
+      .status(400)
+      .json({ error: "Unable to create lead", details: error.message });
   }
 };
 
@@ -87,5 +95,5 @@ const getLeadsByUser = async (req, res) => {
 module.exports = {
   getLeads,
   addLead,
-  getLeadsByUser,
+  getLeadsByUser
 };

@@ -23,7 +23,8 @@ model User {
   role        String     @default("admin")
   routes      Route[]
   campaigns   Campaign[]
-  Lead        Lead[]
+  leads       Lead[]
+  apiKey      String @unique @default("0")
 }
 
 model Route {
