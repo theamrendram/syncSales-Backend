@@ -14,17 +14,17 @@ datasource db {
 }
 
 model User {
-  id          String     @id @default(uuid())
+  id          String     @id @unique @default(uuid())
   firstName   String
   lastName    String
   email       String
-  password    String
-  companyName String
+  password    String?
+  companyName String?
   role        String     @default("admin")
   routes      Route[]
   campaigns   Campaign[]
   leads       Lead[]
-  apiKey      String @unique @default("0")
+  apiKey      String     @unique @default("0")
 }
 
 model Route {
