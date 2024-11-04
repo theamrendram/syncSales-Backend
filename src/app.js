@@ -2,6 +2,9 @@ const express = require("express");
 const app = express();
 const dotenv = require("dotenv");
 const cors = require("cors");
+const { clerkMiddleware, requireAuth, clerkClient } = require("@clerk/express");
+
+// Routes
 const routeRoute = require("./routes/route.route");
 const userRoute = require("./routes/user.route");
 const webhookRoute = require("./routes/webhook.route");
@@ -10,12 +13,19 @@ const campaignRoute = require("./routes/campaign.route");
 const leadsRoute = require("./routes/lead.route");
 dotenv.config();
 
+app.use(clerkMiddleware());
+app.use(express.json());
+app.use(cors());
+
 app.get("/", (req, res) => {
   res.send("server is running");
 });
 
-app.use(express.json());
-app.use(cors());
+app.get("/protected", requireAuth(), async (req, res) => {
+  const { userId } = req.auth;
+  const user = await clerkClient.users.getUser(userId);
+  return res.json({ user });
+});
 
 app.use("/api/v1/route", routeRoute);
 app.use("/api/v1/user", userRoute);
