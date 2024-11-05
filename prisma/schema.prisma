@@ -51,19 +51,14 @@ model Campaign {
   user     User     @relation(fields: [userId], references: [id])
   routeId  String
   route    Route    @relation(fields: [routeId], references: [id])
-  seller   Seller[] @relation("CampaignToSeller")
-  sellerId String
   status   Status   @default(active)
   Lead     Lead[]
-
-  @@unique([sellerId, campId])
 }
 
 model Seller {
   id        String     @id @default(uuid())
   name      String
   apiKey    String     @unique
-  campaigns Campaign[] @relation("CampaignToSeller")
 }
 
 model Lead {

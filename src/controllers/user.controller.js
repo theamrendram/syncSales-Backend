@@ -27,8 +27,20 @@ const addUser = async (req, res) => {
   }
 };
 
+const getAllUsers = async (req, res) => {
+  try {
+    const users = await prismaClient.user.findMany();
+    res.json(users);
+  } catch (error) {
+    res
+      .status(500)
+      .json({ error: "Unable to fetch users", details: error.message });
+  }
+};
+
 module.exports = {
   addUser,
+  getAllUsers,
 };
 
 // {
