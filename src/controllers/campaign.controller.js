@@ -18,6 +18,27 @@ const getCampaigns = async (req, res) => {
   }
 };
 
+const getCampaignsByUser = async (req, res) => {
+  const { userId } = req.params;
+  console.log(userId);
+  try {
+    const campaigns = await prismaClient.campaign.findMany({
+      where: {
+        userId,
+      },
+      include: {
+        user: true, // Include related User data
+        route: true, // Include related Route data
+      },
+    });
+    res.json(campaigns);
+  } catch (error) {
+    res
+      .status(400)
+      .json({ error: "Unable to get campaigns", details: error.message });
+  }
+};
+
 const getCampaignById = async (req, res) => {
   const { id } = req.params;
   try {
@@ -109,6 +130,7 @@ const deleteCampaign = async (req, res) => {
 module.exports = {
   getCampaigns,
   getCampaignById,
+  getCampaignsByUser,
   addCampaign,
   editCampaign,
   deleteCampaign,
