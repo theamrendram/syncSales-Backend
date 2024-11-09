@@ -70,7 +70,7 @@ const editRoute = async (req, res) => {
     method,
     attributes,
   } = req.body;
-  console.log('edit',req.body);
+  console.log("edit", req.body);
   try {
     const route = await prismaClient.route.update({
       where: {
@@ -88,7 +88,7 @@ const editRoute = async (req, res) => {
       },
     });
     console.log(route);
-    res.json(route);    
+    res.json(route);
   } catch (error) {
     res
       .status(400)
@@ -112,10 +112,42 @@ const getRouteByUser = async (req, res) => {
   }
 };
 
+const deleteRouteById = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Convert id if necessary
+    const routeId = String(id);
+
+    // Step 1: Delete associated campaigns only
+    await prismaClient.campaign.deleteMany({
+      where: { routeId },
+    });
+
+    // Step 2: Delete the route itself
+    const deletedRoute = await prismaClient.route.delete({
+      where: { id: routeId },
+    });
+
+    return res.status(200).json({
+      message: "Route and associated campaigns deleted successfully",
+      data: deletedRoute,
+    });
+  } catch (error) {
+    console.error("Error deleting route:", error);
+    return res.status(500).json({
+      error: "Unable to delete route",
+      details: error.message,
+    });
+  }
+};
+
+
 module.exports = {
   addRoute,
   editRoute,
   getRoutes,
   getRouteById,
   getRouteByUser,
+  deleteRouteById,
 };

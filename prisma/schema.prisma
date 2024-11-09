@@ -44,25 +44,26 @@ model Route {
 }
 
 model Campaign {
-  id       String   @id @default(uuid())
-  name     String
-  userId   String
-  campId   String
-  user     User     @relation(fields: [userId], references: [id])
-  routeId  String
-  route    Route    @relation(fields: [routeId], references: [id])
-  status   Status   @default(active)
-  Lead     Lead[]
+  id      String @id @default(uuid())
+  name    String
+  userId  String
+  campId  String
+  manager String
+  user    User   @relation(fields: [userId], references: [id])
+  routeId String
+  route   Route  @relation(fields: [routeId], references: [id])
+  status  Status @default(active)
+  Lead    Lead[]
 }
 
 model Seller {
-  id        String     @id @default(uuid())
-  name      String
-  apiKey    String     @unique
+  id     String @id @default(uuid())
+  name   String
+  apiKey String @unique
 }
 
 model Lead {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   firstName  String
   lastName   String?
   phone      String
@@ -74,11 +75,11 @@ model Lead {
   sub3       String?
   sub4       String?
   userId     String
-  user       User     @relation(fields: [userId], references: [id])
+  user       User      @relation(fields: [userId], references: [id])
   routeId    String
-  route      Route    @relation(fields: [routeId], references: [id])
-  campaignId String
-  campaign   Campaign @relation(fields: [campaignId], references: [id])
+  route      Route     @relation(fields: [routeId], references: [id])
+  campaignId String?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id])
 }
 
 enum Status {

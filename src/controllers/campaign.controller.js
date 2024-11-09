@@ -43,10 +43,10 @@ const getCampaignById = async (req, res) => {
 };
 
 const addCampaign = async (req, res) => {
-  const { name, campId, userId, routeId, sellerId } = req.body;
+  const { name, campId, manager, userId, routeId } = req.body;
 
-  console.log(name, userId, routeId, sellerId);
-
+  console.log("adding new campaign");
+  console.log(req.body);
   try {
     const campaign = await prismaClient.campaign.create({
       data: {
@@ -54,13 +54,13 @@ const addCampaign = async (req, res) => {
         campId,
         userId,
         routeId,
-        sellerId, // Add sellerId if provided, it's optional in the model
-        // Include other fields if they exist in your Campaign model
+        manager,
       },
     });
-    console.log("campaign response", campaign);
+    console.log(campaign);
     res.status(201).json(campaign);
   } catch (error) {
+    console.log(error);
     res
       .status(400)
       .json({ error: "Unable to create campaign", details: error.message });
