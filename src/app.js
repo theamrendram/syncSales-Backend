@@ -37,6 +37,16 @@ app.get("/test", (req, res) => {
   res.send("test route");
 });
 
+
+// test route for webhook
+app.post("/webhook", (req, res) => {
+
+  console.log("req.body from lead -> webhook", req.body);
+
+  res.send(req.body);
+});
+
+
 // Global error handling middleware
 app.use((err, req, res, next) => {
   console.error("Error:", err);

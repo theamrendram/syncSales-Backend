@@ -70,26 +70,25 @@ const editRoute = async (req, res) => {
     method,
     attributes,
   } = req.body;
-  console.log("edit", req.body);
   try {
     const route = await prismaClient.route.update({
       where: {
         id,
       },
       data: {
-        name: name, // Ensure this is provided
-        product: product, // Ensure this is provided
-        payout: payout, // Ensure this is provided
-        description: description, // Ensure this is provided
-        url: url, // Ensure this is provided
-        method: method, // Ensure this is provided
-        attributes: attributes, // Ensure this is provided, should be in JSON format
-        userId: userId, // Ensure this is provided
+        name: name,
+        product: product,
+        payout: payout,
+        description: description,
+        url: url,
+        method: method,
+        attributes: attributes,
+        userId: userId,
       },
     });
-    console.log(route);
     res.json(route);
   } catch (error) {
+    console.error(error);
     res
       .status(400)
       .json({ error: "Unable to update route", details: error.message });
@@ -141,7 +140,6 @@ const deleteRouteById = async (req, res) => {
     });
   }
 };
-
 
 module.exports = {
   addRoute,

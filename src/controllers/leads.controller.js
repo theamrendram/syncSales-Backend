@@ -1,12 +1,14 @@
 const { PrismaClient } = require("@prisma/client");
 const prismaClient = new PrismaClient();
-
+const { sendWebhook } = require("../utils/sendWebhook");
 const getLeads = async (req, res) => {
   const leads = await prismaClient.lead.findMany();
   res.json(leads);
 };
 
 const addLead = async (req, res) => {
+  const data = req.body;
+
   const {
     firstName,
     lastName,
@@ -20,30 +22,47 @@ const addLead = async (req, res) => {
     sub4,
     campId,
     apiKey,
-  } = req.body;
+  } = data;
 
-  console.log("body", req.body);
+  if (!firstName || !lastName || !phone) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  if (!apiKey) {
+    return res.status(400).json({ error: "Missing API key" });
+  }
+
+  if (!campId) {
+    return res.status(400).json({ error: "Missing campaign ID" });
+  }
+
   try {
     const user = await prismaClient.user.findUnique({
       where: {
         apiKey,
       },
     });
+
     if (!user) {
       throw new Error("Invalid API key");
     }
-
-    console.log("user", user);
     const camp = await prismaClient.campaign.findFirst({
       where: {
         campId,
         userId: user.id,
       },
+      include: {
+        route: true,
+      },
     });
     if (!camp) {
       throw new Error("Campaign not found");
     }
-    console.log("camp", camp);
+    const route = camp.route;
+    if (!route) {
+      throw new Error("Route not found");
+    }
+
     const lead = await prismaClient.lead.create({
       data: {
         firstName,
@@ -61,8 +80,16 @@ const addLead = async (req, res) => {
         userId: user.id,
       },
     });
-    console.log(lead);
-    res.status(201).json(lead);
+
+    if (!lead) {
+      throw new Error("Unable to create lead");
+    }
+
+    // #TODO get route and sent lead (webhook)
+    console.log("route", route);
+    const webhookResponse = await sendWebhook(route, lead);
+    console.log(webhookResponse);
+    res.status(201).json(webhookResponse);
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
@@ -91,7 +118,7 @@ const getLeadsByUser = async (req, res) => {
         campaignId: true,
         routeId: true,
         userId: true,
-      }
+      },
     });
     console.log("leads by user id", leads);
     res.json(leads);
