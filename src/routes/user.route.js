@@ -10,8 +10,8 @@ const express = require("express");
 const route = express.Router();
 
 route.post("/", addUser);
-route.get("/api", addUserAPI);
-route.post("/api", getUserAPI);
+route.post("/api-key", addUserAPI);
+route.get("/api-key", getUserAPI);
 route.get("/all", getAllUsers);
 
 module.exports = route;

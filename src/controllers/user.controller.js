@@ -40,7 +40,7 @@ const getAllUsers = async (req, res) => {
 
 const addUserAPI = async (req, res) => {
   const { userId } = req.auth;
-  console.log(userId);
+  console.log("add user api key",userId);
   try {
     const user = await prismaClient.user.findUnique({
       where: {
@@ -50,13 +50,13 @@ const addUserAPI = async (req, res) => {
     console.log(user);
     return res.status(200).json({ body: user });
   } catch (error) {
-    return res.status(200).json({ body: req.auth });
+    return res.status(500).json({ error: error });
   }
 };
 
 const getUserAPI = async (req, res) => {
   const { userId } = req.auth;
-  console.log(userId);
+  console.log("get user api key",userId);
   try {
     const user = await prismaClient.user.findUnique({
       where: {
@@ -64,9 +64,9 @@ const getUserAPI = async (req, res) => {
       },
     });
     console.log(user);
-    return res.status(200).json({ body: user });
+    return res.status(200).json({ data: user });
   } catch (error) {
-    return res.status(200).json({ body: req.auth });
+    return res.status(500).json({ error: error});
   }
 };
 
