@@ -38,9 +38,43 @@ const getAllUsers = async (req, res) => {
   }
 };
 
+const addUserAPI = async (req, res) => {
+  const { userId } = req.auth;
+  console.log(userId);
+  try {
+    const user = await prismaClient.user.findUnique({
+      where: {
+        id: userId,
+      },
+    });
+    console.log(user);
+    return res.status(200).json({ body: user });
+  } catch (error) {
+    return res.status(200).json({ body: req.auth });
+  }
+};
+
+const getUserAPI = async (req, res) => {
+  const { userId } = req.auth;
+  console.log(userId);
+  try {
+    const user = await prismaClient.user.findUnique({
+      where: {
+        id: userId,
+      },
+    });
+    console.log(user);
+    return res.status(200).json({ body: user });
+  } catch (error) {
+    return res.status(200).json({ body: req.auth });
+  }
+};
+
 module.exports = {
   addUser,
   getAllUsers,
+  addUserAPI,
+  getUserAPI,
 };
 
 // {

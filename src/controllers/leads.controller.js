@@ -76,6 +76,7 @@ const getLeadsByUser = async (req, res) => {
         userId,
       },
     });
+    console.log("leads by user id", leads);
     res.json(leads);
   } catch (error) {
     res

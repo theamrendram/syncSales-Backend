@@ -26,23 +26,12 @@ app.get("/unauthenticated", (req, res) => {
   res.send("unauthenticated request");
 });
 
-app.get("/protected", requireAuth(), async (req, res) => {
-  try {
-    const { userId } = req.auth;
-    const user = await clerkClient.users.getUser(userId);
-    return res.json({ user });
-  } catch (error) {
-    console.error("Failed to fetch user data:", error);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
-});
-
-app.use("/api/v1/route", routeRoute);
-app.use("/api/v1/user", userRoute);
-app.use("/api/v1/webhook", webhookRoute);
-app.use("/api/v1/seller", sellerRoute);
-app.use("/api/v1/campaign", campaignRoute);
-app.use("/api/v1/lead", leadsRoute);
+app.use("/api/v1/route", requireAuth(), routeRoute);
+app.use("/api/v1/user", requireAuth(), userRoute);
+app.use("/api/v1/webhook", requireAuth(), webhookRoute);
+app.use("/api/v1/seller", requireAuth(), sellerRoute);
+app.use("/api/v1/campaign", requireAuth(), campaignRoute);
+app.use("/api/v1/lead", requireAuth(), leadsRoute);
 
 app.get("/test", (req, res) => {
   res.send("test route");

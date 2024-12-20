@@ -75,6 +75,7 @@ model Lead {
   sub3       String?
   sub4       String?
   userId     String
+  date       DateTime  @default(now())
   user       User      @relation(fields: [userId], references: [id])
   routeId    String
   route      Route     @relation(fields: [routeId], references: [id])
