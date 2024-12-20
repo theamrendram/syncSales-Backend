@@ -75,10 +75,28 @@ const getLeadsByUser = async (req, res) => {
       where: {
         userId,
       },
+      select: {
+        id: true,
+        date: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        email: true,
+        address: true,
+        status: true,
+        sub1: true,
+        sub2: true,
+        sub3: true,
+        sub4: true,
+        campaignId: true,
+        routeId: true,
+        userId: true,
+      }
     });
     console.log("leads by user id", leads);
     res.json(leads);
   } catch (error) {
+    console.log(error);
     res
       .status(400)
       .json({ error: "Unable to get leads", details: error.message });
