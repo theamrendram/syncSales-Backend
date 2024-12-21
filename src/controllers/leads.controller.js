@@ -1,14 +1,17 @@
-const { PrismaClient } = require("@prisma/client");
-const prismaClient = new PrismaClient();
+const prismaClient = require("../utils/prismaClient");
 const { sendWebhook } = require("../utils/sendWebhook");
 const getLeads = async (req, res) => {
-  const leads = await prismaClient.lead.findMany();
-  res.json(leads);
+  try {
+    const leads = await prismaClient.lead.findMany();
+    res.json(leads);
+  } catch (error) {
+    res
+      .status(500)
+      .json({ error: "Unable to fetch leads", details: error.message });
+  }
 };
 
 const addLead = async (req, res) => {
-  const data = req.body;
-
   const {
     firstName,
     lastName,
@@ -22,45 +25,27 @@ const addLead = async (req, res) => {
     sub4,
     campId,
     apiKey,
-  } = data;
+  } = req.body;
 
-  if (!firstName || !lastName || !phone) {
+  if (!firstName || !lastName || !phone || !apiKey || !campId) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
-  if (!apiKey) {
-    return res.status(400).json({ error: "Missing API key" });
-  }
-
-  if (!campId) {
-    return res.status(400).json({ error: "Missing campaign ID" });
-  }
-
   try {
-    const user = await prismaClient.user.findUnique({
-      where: {
-        apiKey,
-      },
-    });
+    const [user, campaign] = await Promise.all([
+      prismaClient.user.findUnique({ where: { apiKey } }),
+      prismaClient.campaign.findFirst({
+        where: { campId },
+        include: { route: true },
+      }),
+    ]);
 
     if (!user) {
-      throw new Error("Invalid API key");
+      return res.status(400).json({ error: "Invalid API key" });
     }
-    const camp = await prismaClient.campaign.findFirst({
-      where: {
-        campId,
-        userId: user.id,
-      },
-      include: {
-        route: true,
-      },
-    });
-    if (!camp) {
-      throw new Error("Campaign not found");
-    }
-    const route = camp.route;
-    if (!route) {
-      throw new Error("Route not found");
+
+    if (!campaign) {
+      return res.status(400).json({ error: "Invalid campaign ID" });
     }
 
     const lead = await prismaClient.lead.create({
@@ -75,23 +60,18 @@ const addLead = async (req, res) => {
         sub2,
         sub3,
         sub4,
-        campaignId: camp.id,
-        routeId: camp.routeId,
+        campaignId: campaign.id,
+        routeId: campaign.routeId,
         userId: user.id,
       },
     });
-
-    if (!lead) {
-      throw new Error("Unable to create lead");
-    }
-
-    // #TODO get route and sent lead (webhook)
-    console.log("route", route);
-    const webhookResponse = await sendWebhook(route, lead);
-    console.log(webhookResponse);
+    console.log("Lead created", campaign);
+    const webhookResponse = await sendWebhook(campaign.route, lead);
     res.status(201).json(webhookResponse);
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    res
+      .status(400)
+      .json({ error: "Unable to create lead", details: error.message });
   }
 };
 
@@ -101,23 +81,6 @@ const getLeadsByUser = async (req, res) => {
     const leads = await prismaClient.lead.findMany({
       where: {
         userId,
-      },
-      select: {
-        id: true,
-        date: true,
-        firstName: true,
-        lastName: true,
-        phone: true,
-        email: true,
-        address: true,
-        status: true,
-        sub1: true,
-        sub2: true,
-        sub3: true,
-        sub4: true,
-        campaignId: true,
-        routeId: true,
-        userId: true,
       },
     });
     console.log("leads by user id", leads);
