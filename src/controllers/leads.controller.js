@@ -69,6 +69,7 @@ const addLead = async (req, res) => {
     const webhookResponse = await sendWebhook(campaign.route, lead);
     res.status(201).json(webhookResponse);
   } catch (error) {
+    console.log(error);
     res
       .status(400)
       .json({ error: "Unable to create lead", details: error.message });

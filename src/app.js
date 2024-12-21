@@ -45,6 +45,12 @@ app.post("/webhook", (req, res) => {
 
   res.send(req.body);
 });
+app.get("/webhook", (req, res) => {
+
+  console.log("req.body from lead -> webhook", req.body);
+
+  res.send(req.body);
+});
 
 
 // Global error handling middleware

@@ -7,12 +7,22 @@ const sendWebhook = async (route, lead) => {
     return acc;
   }, {});
 
-
   const response = await axios({
     method: method,
     url: url,
     data: bodyParams,
   });
+
+  if (response.status !== 200) {
+    throw new Error("Failed to send webhook");
+  } else if (response.data.error) {
+    throw new Error(response.data.error);
+  } else if (
+    typeof response.data == "string" &&
+    response.data.startsWith("<!DOCTYPE html>")
+  ) {
+    throw new Error("Invalid response from webhook URL or METHOD");
+  }
 
   return response.data;
   console.log("bodyParams", bodyParams);
