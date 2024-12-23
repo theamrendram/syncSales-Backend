@@ -1,13 +1,22 @@
 const prismaClient = require("../utils/prismaClient");
 const { sendWebhook } = require("../utils/sendWebhook");
 const getLeads = async (req, res) => {
+  const { page = 1, items = 5 } = req.query;
+
+  const skip = (page - 1) * items;
+  const take = parseInt(items);
+
   try {
-    const leads = await prismaClient.lead.findMany();
+    const leads = await prismaClient.lead.findMany({
+      include: {
+        campaign: true,
+      },
+    });
+    console.log("leads", leads);
     res.json(leads);
   } catch (error) {
-    res
-      .status(500)
-      .json({ error: "Unable to fetch leads", details: error.message });
+    // console.log(error);
+    res.status(500).json({ error: "Unable to fetch leads", details: error }); // 500 Internal Server Error
   }
 };
 
@@ -32,17 +41,34 @@ const addLead = async (req, res) => {
   }
 
   try {
-    const [user, campaign] = await Promise.all([
-      prismaClient.user.findUnique({ where: { apiKey } }),
-      prismaClient.campaign.findFirst({
-        where: { campId },
-        include: { route: true },
-      }),
-    ]);
+    const userWithCampaign = await prismaClient.user.findUnique({
+      where: { apiKey },
+      select: {
+        id: true,
+        campaigns: {
+          where: {
+            campId,
+          },
+          select: {
+            id: true,
+            routeId: true,
+            route: {
+              select: {
+                url: true,
+                method: true,
+                attributes: true,
+              },
+            },
+          },
+        },
+      },
+    });
 
-    if (!user) {
+    if (!userWithCampaign) {
       return res.status(400).json({ error: "Invalid API key" });
     }
+
+    const campaign = userWithCampaign.campaigns[0];
 
     if (!campaign) {
       return res.status(400).json({ error: "Invalid campaign ID" });
@@ -62,10 +88,10 @@ const addLead = async (req, res) => {
         sub4,
         campaignId: campaign.id,
         routeId: campaign.routeId,
-        userId: user.id,
+        userId: userWithCampaign.id,
       },
     });
-    console.log("Lead created", campaign);
+
     const webhookResponse = await sendWebhook(campaign.route, lead);
     res.status(201).json(webhookResponse);
   } catch (error) {
