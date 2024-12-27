@@ -1,5 +1,5 @@
 const prismaClient = require("../utils/prismaClient");
-
+const { generateKey } = require("../utils/generate-key");
 const addUser = async (req, res) => {
   const { firstName, lastName, email, password, companyName, role, userId } =
     req.body;
@@ -40,23 +40,37 @@ const getAllUsers = async (req, res) => {
 
 const addUserAPI = async (req, res) => {
   const { userId } = req.auth;
-  console.log("add user api key", userId);
   try {
     const user = await prismaClient.user.findUnique({
       where: {
         id: userId,
       },
     });
-    console.log(user);
-    return res.status(200).json({ body: user });
+    if (!user) {
+      return res.status(400).json({ error: "User not found" });
+    }
+
+    if (user.apiKey) {
+      return res.status(400).json({ error: "API key already exists" });
+    }
+
+    const updatedUser = await prismaClient.user.update({
+      where: {
+        id: userId,
+      },
+      data: {
+        apiKey: generateKey(),
+      },
+    });
+    return res.status(200).json({ apiKey: updatedUser.apiKey });
   } catch (error) {
+    console.log(error);
     return res.status(500).json({ error: error });
   }
 };
 
 const getUserAPI = async (req, res) => {
   const { userId } = req.auth;
-  console.log("get user api key", userId);
   try {
     const user = await prismaClient.user.findUnique({
       where: {
