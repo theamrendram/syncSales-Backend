@@ -5,6 +5,17 @@ const addUser = async (req, res) => {
     req.body;
   console.log(req.body);
   try {
+
+    const userExists = await prismaClient.user.findUnique({
+      where: {
+        id: userId,
+      },
+    });
+
+    if (userExists) {
+      return res.status(400).json({ error: "User already exists" });
+    }
+
     const user = await prismaClient.user.create({
       data: {
         id: userId,
@@ -21,6 +32,7 @@ const addUser = async (req, res) => {
     });
     res.status(201).json(user);
   } catch (error) {
+    console.log(error);
     res
       .status(400)
       .json({ error: "Unable to create user", details: error.message });

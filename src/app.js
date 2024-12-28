@@ -27,7 +27,7 @@ app.get("/unauthenticated", (req, res) => {
 });
 
 app.use("/api/v1/route", requireAuth(), routeRoute);
-app.use("/api/v1/user", requireAuth(), userRoute);
+app.use("/api/v1/user", userRoute);
 app.use("/api/v1/webhook", requireAuth(), webhookRoute);
 app.use("/api/v1/seller", requireAuth(), sellerRoute);
 app.use("/api/v1/campaign", requireAuth(), campaignRoute);
