@@ -2,10 +2,16 @@ const axios = require("axios");
 const sendWebhook = async (route, lead) => {
   const { url, method, attributes } = route;
 
+  console.log("attributes", attributes);
+
   const bodyParams = attributes.reduce((acc, attribute) => {
     acc[attribute.value] = lead[attribute.param];
+    if (attribute.param === "fullName")
+      acc[attribute.value] = `${lead.firstName} ${lead.lastName}`;
     return acc;
   }, {});
+
+  console.log("bodyParams", bodyParams);
 
   const response = await axios({
     method: method,
@@ -25,7 +31,6 @@ const sendWebhook = async (route, lead) => {
   }
 
   return response.data;
-  console.log("bodyParams", bodyParams);
 };
 
 module.exports = { sendWebhook };
