@@ -40,6 +40,7 @@ const getCampaignsByUser = async (req, res) => {
 
 const getCampaignById = async (req, res) => {
   const { id } = req.params;
+  console.log("id", id);
   try {
     const campaign = await prismaClient.campaign.findUnique({
       where: {
@@ -48,7 +49,6 @@ const getCampaignById = async (req, res) => {
       include: {
         user: false, // Include related User data
         route: true, // Include related Route data
-        seller: true, // Include related Sellers
       },
     });
     if (!campaign) {
