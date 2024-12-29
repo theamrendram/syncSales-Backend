@@ -1,36 +1,66 @@
 const axios = require("axios");
+
 const sendWebhook = async (route, lead) => {
   const { url, method, attributes } = route;
 
-  console.log("attributes", attributes);
+  console.log("lead:", lead);
 
+  // Build body parameters
   const bodyParams = attributes.reduce((acc, attribute) => {
-    acc[attribute.value] = lead[attribute.param];
-    if (attribute.param === "fullName")
-      acc[attribute.value] = `${lead.firstName} ${lead.lastName}`;
+    if (attribute.type === "body") {
+      if (attribute.param === "fullName") {
+        // Concatenate first and last names for "fullName"
+        acc[attribute.value] = `${lead.firstName || ""} ${
+          lead.lastName || ""
+        }`.trim();
+      } else if (attribute.isCustom) {
+        // Handle custom body attributes
+        acc[attribute.param] = attribute.value;
+      } else {
+        // Map lead data to body attribute
+        acc[attribute.value] = lead[attribute.param];
+      }
+    }
     return acc;
   }, {});
 
-  console.log("bodyParams", bodyParams);
+  // Build header parameters
+  const headerParams = attributes.reduce((acc, attribute) => {
+    if (attribute.type === "header" && attribute.isCustom) {
+      // Add custom header
+      acc[attribute.param] = attribute.value;
+    }
+    return acc;
+  }, {});
 
-  const response = await axios({
-    method: method,
-    url: url,
-    data: bodyParams,
-  });
+  console.log("bodyParams:", bodyParams);
+  console.log("headerParams:", headerParams);
 
-  if (response.status !== 200) {
-    throw new Error("Failed to send webhook");
-  } else if (response.data.error) {
-    throw new Error(response.data.error);
-  } else if (
-    typeof response.data == "string" &&
-    response.data.startsWith("<!DOCTYPE html>")
-  ) {
-    throw new Error("Invalid response from webhook URL or METHOD");
+  try {
+    // Make the webhook request
+    const response = await axios({
+      method: method,
+      url: url,
+      data: { ...bodyParams },
+      headers: headerParams,
+    });
+
+    if (response.status !== 200) {
+      throw new Error("Failed to send webhook");
+    } else if (response.data.error) {
+      throw new Error(response.data.error);
+    } else if (
+      typeof response.data === "string" &&
+      response.data.startsWith("<!DOCTYPE html>")
+    ) {
+      throw new Error("Invalid response from webhook URL or METHOD");
+    }
+
+    return response.data;
+  } catch (error) {
+    console.error("Error sending webhook:", error.message);
+    throw error;
   }
-
-  return response.data;
 };
 
 module.exports = { sendWebhook };
