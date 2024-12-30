@@ -17,6 +17,7 @@ const webhookRoute = require("./routes/webhook.route");
 const sellerRoute = require("./routes/seller.route");
 const campaignRoute = require("./routes/campaign.route");
 const leadsRoute = require("./routes/lead.route");
+const postbackRoute = require("./routes/postback.route")
 
 app.get("/", (req, res) => {
   res.send("server is running");
@@ -32,6 +33,7 @@ app.use("/api/v1/webhook", requireAuth(), webhookRoute);
 app.use("/api/v1/seller", requireAuth(), sellerRoute);
 app.use("/api/v1/campaign", requireAuth(), campaignRoute);
 app.use("/api/v1/lead", requireAuth(), leadsRoute);
+app.use("/api/v1/postback", postbackRoute);
 
 app.get("/test", (req, res) => {
   res.send("test route");
