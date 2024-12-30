@@ -1,5 +1,6 @@
 const prismaClient = require("../utils/prismaClient");
 const { sendWebhook } = require("../utils/sendWebhook");
+const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
 const getLeads = async (req, res) => {
   const { page = 1, items = 5 } = req.query;
 
@@ -27,7 +28,6 @@ const addLead = async (req, res) => {
     phone,
     email,
     address,
-    status,
     sub1,
     sub2,
     sub3,
@@ -52,6 +52,7 @@ const addLead = async (req, res) => {
           select: {
             id: true,
             routeId: true,
+            lead_period: true,
             route: {
               select: {
                 url: true,
@@ -74,6 +75,31 @@ const addLead = async (req, res) => {
       return res.status(400).json({ error: "Invalid campaign ID" });
     }
 
+    const isDuplicate = await checkDuplicateLead(phone, campaign);
+    console.log("duplicate lead", isDuplicate);
+    if (isDuplicate) {
+      const duplicateLead = await prismaClient.lead.create({
+        data: {
+          firstName,
+          lastName,
+          phone,
+          email,
+          address,
+          status: "Duplicate",
+          sub1,
+          sub2,
+          sub3,
+          sub4,
+          campaignId: campaign.id,
+          routeId: campaign.routeId,
+          userId: userWithCampaign.id,
+        },
+      });
+      return res
+        .status(400)
+        .json({ lead_id: duplicateLead.id, status: "Duplicate" });
+    }
+
     const lead = await prismaClient.lead.create({
       data: {
         firstName,
@@ -81,7 +107,7 @@ const addLead = async (req, res) => {
         phone,
         email,
         address,
-        status,
+        status: "Pending",
         sub1,
         sub2,
         sub3,
