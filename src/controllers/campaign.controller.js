@@ -63,10 +63,9 @@ const getCampaignById = async (req, res) => {
 };
 
 const addCampaign = async (req, res) => {
-  const { name, campId, manager, userId, routeId } = req.body;
+  const { name, campId, manager, userId, routeId, lead_period } = req.body;
 
-  console.log("adding new campaign");
-  console.log(req.body);
+  console.log("adding new campaign", req.body);
   try {
     const campaign = await prismaClient.campaign.create({
       data: {
@@ -75,6 +74,7 @@ const addCampaign = async (req, res) => {
         userId,
         routeId,
         manager,
+        lead_period : Number(lead_period),
       },
     });
     console.log(campaign);
