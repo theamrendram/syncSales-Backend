@@ -93,7 +93,8 @@ const addLead = async (req, res) => {
     });
 
     const webhookResponse = await sendWebhook(campaign.route, lead);
-    res.status(201).json(webhookResponse);
+
+    res.status(201).json({ lead_id: lead.id, ...webhookResponse });
   } catch (error) {
     console.log(error);
     res

@@ -25,6 +25,8 @@ model User {
   campaigns   Campaign[]
   leads       Lead[]
   apiKey      String     @unique @default("0")
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 }
 
 model Route {
@@ -41,19 +43,24 @@ model Route {
   user        User       @relation(fields: [userId], references: [id])
   campaigns   Campaign[]
   Lead        Lead[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 }
 
 model Campaign {
-  id      String @id @default(uuid())
-  name    String
-  userId  String
-  campId  String
-  manager String
-  user    User   @relation(fields: [userId], references: [id])
-  routeId String
-  route   Route  @relation(fields: [routeId], references: [id])
-  status  Status @default(active)
-  Lead    Lead[]
+  id          String   @id @default(uuid())
+  name        String
+  userId      String
+  campId      String
+  manager     String
+  user        User     @relation(fields: [userId], references: [id])
+  routeId     String
+  route       Route    @relation(fields: [routeId], references: [id])
+  status      Status   @default(active)
+  Lead        Lead[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lead_period Int      @default(90)
 }
 
 model Seller {
@@ -81,6 +88,8 @@ model Lead {
   route      Route     @relation(fields: [routeId], references: [id])
   campaignId String?
   campaign   Campaign? @relation(fields: [campaignId], references: [id])
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 }
 
 enum Status {
