@@ -18,9 +18,9 @@
     "uuid": "^10.0.0"
   },
   "devDependencies": {
-    "@prisma/client": "^5.21.1",
+    "@prisma/client": "^6.1.0",
     "i": "^0.3.7",
     "npm": "^10.9.0",
-    "prisma": "^5.21.1"
+    "prisma": "^6.1.0"
   }
 }

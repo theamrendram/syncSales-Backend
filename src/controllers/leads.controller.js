@@ -136,6 +136,9 @@ const getLeadsByUser = async (req, res) => {
       where: {
         userId,
       },
+      include: {
+        campaign: true,
+      },
     });
     console.log("leads by user id", leads);
     res.json(leads);
