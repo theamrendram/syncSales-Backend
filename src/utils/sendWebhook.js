@@ -3,12 +3,10 @@ const axios = require("axios");
 const sendWebhook = async (route, lead) => {
   const { url, method, attributes } = route;
 
-  console.log("lead:", lead);
-
   // Build body parameters
   const bodyParams = attributes.reduce((acc, attribute) => {
     if (attribute.type === "body") {
-      if (attribute.param === "fullName") {
+      if (attribute.param === "fullName" || attribute.param === "name") {
         // Concatenate first and last names for "fullName"
         acc[attribute.value] = `${lead.firstName || ""} ${
           lead.lastName || ""
@@ -16,7 +14,8 @@ const sendWebhook = async (route, lead) => {
       } else if (attribute.isCustom) {
         // Handle custom body attributes
         acc[attribute.param] = attribute.value;
-      } else {
+      }
+      else {
         // Map lead data to body attribute
         acc[attribute.value] = lead[attribute.param];
       }
@@ -56,6 +55,7 @@ const sendWebhook = async (route, lead) => {
       throw new Error("Invalid response from webhook URL or METHOD");
     }
 
+    console.log("Webhook response:", response.data);
     return response.data;
   } catch (error) {
     console.error("Error sending webhook:", error.message);

@@ -25,6 +25,7 @@ model User {
   campaigns   Campaign[]
   leads       Lead[]
   apiKey      String     @unique @default("0")
+  subscriptionId String  @default("0000000000")
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 }
@@ -77,6 +78,8 @@ model Lead {
   email      String?
   address    String?
   status     String
+  country     String?
+  ip         String?
   sub1       String?
   sub2       String?
   sub3       String?
@@ -90,6 +93,22 @@ model Lead {
   campaign   Campaign? @relation(fields: [campaignId], references: [id])
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
+}
+
+model Payment {
+  id            String   @id @default(uuid())
+  amount        Float
+  currency      String   // e.g., 'USD', 'EUR'
+  status        String   // e.g., 'pending', 'completed', 'failed', 'refunded'
+  paymentMethod String   // e.g., 'credit_card', 'paypal', 'bank_transfer'
+  transactionId String?  // Unique identifier for the transaction from the payment processor
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  description   String?  // Optional description of the payment
+  receiptUrl    String?  // Optional URL to the payment receipt
+  metadata      Json?    // Optional JSON field for additional payment metadata
 }
 
 enum Status {

@@ -1,14 +1,11 @@
 const express = require("express");
 const dotenv = require("dotenv");
+dotenv.config();
 const cors = require("cors");
+const bodyParser = require("body-parser");
 const { clerkMiddleware, requireAuth, clerkClient } = require("@clerk/express");
 
-dotenv.config();
-
 const app = express();
-app.use(clerkMiddleware());
-app.use(express.json());
-app.use(cors());
 
 // Routes
 const routeRoute = require("./routes/route.route");
@@ -17,7 +14,18 @@ const webhookRoute = require("./routes/webhook.route");
 const sellerRoute = require("./routes/seller.route");
 const campaignRoute = require("./routes/campaign.route");
 const leadsRoute = require("./routes/lead.route");
+const leadsApiRoute = require("./routes/leads-api.route");
 const postbackRoute = require("./routes/postback.route")
+const paymentRoute = require("./routes/payment.route");
+
+app.use(express.json());
+app.use(cors());
+app.use(express.urlencoded({ extended: true })); 
+
+// leads api
+app.use("/api/v1/lead/create", leadsApiRoute);
+
+app.use(clerkMiddleware());
 
 app.get("/", (req, res) => {
   res.send("server is running");
@@ -34,6 +42,7 @@ app.use("/api/v1/seller", requireAuth(), sellerRoute);
 app.use("/api/v1/campaign", requireAuth(), campaignRoute);
 app.use("/api/v1/lead", requireAuth(), leadsRoute);
 app.use("/api/v1/postback", postbackRoute);
+app.use("/api/v1/payment", requireAuth(), paymentRoute);
 
 app.get("/test", (req, res) => {
   res.send("test route");

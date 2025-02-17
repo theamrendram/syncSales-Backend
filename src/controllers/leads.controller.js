@@ -1,6 +1,7 @@
 const prismaClient = require("../utils/prismaClient");
 const { sendWebhook } = require("../utils/sendWebhook");
 const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
+const getIpAndCountry = require("../utils/get-ip-and-country");
 const getLeads = async (req, res) => {
   const { page = 1, items = 5 } = req.query;
 
@@ -35,6 +36,8 @@ const addLead = async (req, res) => {
     campId,
     apiKey,
   } = req.body;
+
+  const { ip, country } = getIpAndCountry(req);
 
   if (!firstName || !lastName || !phone || !apiKey || !campId) {
     return res.status(400).json({ error: "Missing required fields" });
@@ -85,6 +88,8 @@ const addLead = async (req, res) => {
           phone,
           email,
           address,
+          ip,
+          country,
           status: "Duplicate",
           sub1,
           sub2,
@@ -107,6 +112,8 @@ const addLead = async (req, res) => {
         phone,
         email,
         address,
+        ip,
+        country,
         status: "Pending",
         sub1,
         sub2,
