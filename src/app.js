@@ -23,7 +23,7 @@ app.use(cors());
 app.use(express.urlencoded({ extended: true })); 
 
 // leads api
-app.use("/api/v1/lead/create", leadsApiRoute);
+app.use("/api/v1/leads", leadsApiRoute);
 
 app.use(clerkMiddleware());
 

@@ -4,7 +4,7 @@ const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
 const getIpAndCountry = require("../utils/get-ip-and-country");
 
 const addLead = async (req, res) => {
-  const {
+  let {
     name,
     phone,
     email,
@@ -25,6 +25,7 @@ const addLead = async (req, res) => {
 
   const { ip, country } = getIpAndCountry(req);
   const [firstName, lastName] = name.split(" ");
+  phone = String(phone).replace(/\D/g, "");
   try {
     const userWithCampaign = await prismaClient.user.findUnique({
       where: { apiKey },
