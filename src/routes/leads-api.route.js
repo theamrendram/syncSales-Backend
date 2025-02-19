@@ -1,4 +1,4 @@
-const { addLead, addLeadGet } = require("../controllers/leads.api.controller");
+const { addLead, addLeadGet } = require("../controllers/leads-api.controller");
 
 const router = require("express").Router();
 

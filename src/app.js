@@ -1,73 +1,74 @@
-const express = require("express");
-const dotenv = require("dotenv");
-dotenv.config();
-const cors = require("cors");
-const bodyParser = require("body-parser");
-const { clerkMiddleware, requireAuth, clerkClient } = require("@clerk/express");
+  const express = require("express");
+  const dotenv = require("dotenv");
+  dotenv.config();
+  const cors = require("cors");
+  const bodyParser = require("body-parser");
+  const { clerkMiddleware, requireAuth, clerkClient} = require("@clerk/express");
 
-const app = express();
+  const app = express();
 
-// Routes
-const routeRoute = require("./routes/route.route");
-const userRoute = require("./routes/user.route");
-const webhookRoute = require("./routes/webhook.route");
-const sellerRoute = require("./routes/seller.route");
-const campaignRoute = require("./routes/campaign.route");
-const leadsRoute = require("./routes/lead.route");
-const leadsApiRoute = require("./routes/leads-api.route");
-const postbackRoute = require("./routes/postback.route")
-const paymentRoute = require("./routes/payment.route");
+  // Routes
+  const routeRoute = require("./routes/route.route");
+  const userRoute = require("./routes/user.route");
+  const webhookRoute = require("./routes/webhook.route");
+  const sellerRoute = require("./routes/seller.route");
+  const campaignRoute = require("./routes/campaign.route");
+  const leadsRoute = require("./routes/lead.route");
+  const leadsApiRoute = require("./routes/leads-api.route");
+  const postbackRoute = require("./routes/postback.route")
+  const paymentRoute = require("./routes/payment.route");
 
-app.use(express.json());
-app.use(cors());
-app.use(express.urlencoded({ extended: true })); 
+  app.use(express.json());
+  app.use(cors());
+  app.use(express.urlencoded({ extended: true })); 
 
-// leads api
-app.use("/api/v1/leads", leadsApiRoute);
+  // leads api
+  app.use("/api/v1/leads", leadsApiRoute);
 
-app.use(clerkMiddleware());
+  
+  app.get("/", (req, res) => {
+    res.send("server is running");
+  });
+  
+  app.get("/unauthenticated", (req, res) => {
+    res.send("unauthenticated request");
+  });
+  
+  app.use(clerkMiddleware());
+  
+  app.use("/api/v1/route", requireAuth(), routeRoute);
+  app.use("/api/v1/user", userRoute);
+  app.use("/api/v1/webhook", requireAuth(), webhookRoute);
+  app.use("/api/v1/seller", requireAuth(), sellerRoute);
+  app.use("/api/v1/campaign", requireAuth(), campaignRoute);
+  app.use("/api/v1/lead", requireAuth(), leadsRoute);
+  app.use("/api/v1/postback", postbackRoute);
+  app.use("/api/v1/payment", requireAuth(), paymentRoute);
 
-app.get("/", (req, res) => {
-  res.send("server is running");
-});
-
-app.get("/unauthenticated", (req, res) => {
-  res.send("unauthenticated request");
-});
-
-app.use("/api/v1/route", requireAuth(), routeRoute);
-app.use("/api/v1/user", userRoute);
-app.use("/api/v1/webhook", requireAuth(), webhookRoute);
-app.use("/api/v1/seller", requireAuth(), sellerRoute);
-app.use("/api/v1/campaign", requireAuth(), campaignRoute);
-app.use("/api/v1/lead", requireAuth(), leadsRoute);
-app.use("/api/v1/postback", postbackRoute);
-app.use("/api/v1/payment", requireAuth(), paymentRoute);
-
-app.get("/test", (req, res) => {
-  res.send("test route");
-});
-
-
-// test route for webhook
-app.post("/webhook", (req, res) => {
-
-  console.log("req.body from lead -> webhook", req.body);
-
-  res.send(req.body);
-});
-app.get("/webhook", (req, res) => {
-
-  console.log("req.body from lead -> webhook", req.body);
-
-  res.send(req.body);
-});
+  app.get("/test", (req, res) => {
+    res.send("test route");
+  });
 
 
-// Global error handling middleware
-app.use((err, req, res, next) => {
-  console.error("Error:", err);
-  res.status(500).json({ message: "Internal Server Error" });
-});
+  // test route for webhook
+  app.post("/webhook", (req, res) => {
 
-module.exports = app;
+    console.log("req.body from lead -> webhook", req.body);
+
+    res.send(req.body);
+  });
+  app.get("/webhook", (req, res) => {
+
+    console.log("req.body from lead -> webhook", req.body);
+
+    res.send(req.body);
+  });
+
+
+  // Global error handling middleware
+  app.use((err, req, res, next) => {
+    console.error("Error:", err);
+    res.status(500).json({ message: "Internal Server Error" });
+  });
+
+  module.exports = app;

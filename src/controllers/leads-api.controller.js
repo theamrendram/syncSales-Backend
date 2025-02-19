@@ -110,7 +110,7 @@ const addLead = async (req, res) => {
 
     const webhookResponse = await sendWebhook(campaign.route, lead);
 
-    res.status(201).json({ success: true, lead_id: lead.id, status: lead.status, ...lead });
+    res.status(201).json({ success: true, lead_id: lead.id, status: lead.status,});
   } catch (error) {
     console.log(error);
     res
@@ -223,7 +223,7 @@ const addLeadGet = async (req, res) => {
 
     const webhookResponse = await sendWebhook(campaign.route, lead);
 
-    res.status(201).json({ lead_id: lead.id, ...webhookResponse });
+    res.status(201).json({ lead_id: lead.id, status: lead.status,});
   } catch (error) {
     console.log(error);
     res
