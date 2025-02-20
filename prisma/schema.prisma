@@ -38,9 +38,10 @@ model Route {
   product     String
   payout      Float
   description String
-  url         String
-  method      String
-  attributes  Json
+  hasWebhook  Boolean    @default(true)
+  url         String?
+  method      String?
+  attributes  Json?
   userId      String
   user        User       @relation(fields: [userId], references: [id])
   campaigns   Campaign[]

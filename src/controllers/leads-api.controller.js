@@ -15,9 +15,9 @@ const addLead = async (req, res) => {
     sub4,
     campId,
     apiKey,
-  } = req.body;
+  } = await req.body;
 
-  console.log("req.body", req.body);
+  // console.log("lead body", req.body);
 
   if (!name || !phone || !apiKey || !campId) {
     return res.status(400).json({ error: "Missing required fields" });

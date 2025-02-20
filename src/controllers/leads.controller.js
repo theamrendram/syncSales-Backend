@@ -145,6 +145,11 @@ const getLeadsByUser = async (req, res) => {
       },
       include: {
         campaign: true,
+        route: {
+          select: {
+            payout: true,
+          },
+        },
       },
     });
     console.log("leads by user id", leads);

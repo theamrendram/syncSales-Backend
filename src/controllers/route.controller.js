@@ -24,18 +24,21 @@ const addRoute = async (req, res) => {
         product: product, // Ensure this is provided
         payout: payout, // Ensure this is provided
         description: description, // Ensure this is provided
+        hasWebhook: url ? true : false,
         url: url, // Ensure this is provided
         method: method, // Ensure this is provided
         attributes: attributes, // Ensure this is provided, should be in JSON format
         userId: userId, // Ensure this is provided
       },
     });
-    return res.json(route);
+    return res.status(201).json({ success: true, data: route });
   } catch (error) {
     console.error(error);
-    return res
-      .status(500)
-      .json({ error: "Unable to create route", details: error.message });
+    return res.status(500).json({
+      error: "Unable to create route",
+      details: error.message,
+      success: false,
+    });
   }
 };
 
