@@ -3,8 +3,58 @@ const { sendWebhook } = require("../utils/sendWebhook");
 const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
 const getIpAndCountry = require("../utils/get-ip-and-country");
 
+const createLead = async (leadData) => {
+  return await prismaClient.lead.create({ data: leadData });
+};
+
+const handleDuplicateLead = async (leadData, res) => {
+  const duplicateLead = await createLead({ ...leadData, status: "Duplicate" });
+  return res
+    .status(400)
+    .json({ lead_id: duplicateLead.id, status: "Duplicate" });
+};
+
+const handleNewLead = async (leadData, userWithCampaign, res) => {
+  const lead = await createLead(leadData);
+  if (!lead) {
+    return res.status(400).json({ error: "Unable to create lead" });
+  } 
+
+  if (userWithCampaign.campaigns[0].route.hasWebhook) {
+    await sendWebhook(userWithCampaign.route, lead);
+  }
+  return res
+    .status(201)
+    .json({ success: true, lead_id: lead.id, status: lead.status });
+};
+
+const getUserWithCampaign = async (apiKey, campId) => {
+  return await prismaClient.user.findUnique({
+    where: { apiKey },
+    select: {
+      id: true,
+      campaigns: {
+        where: { campId },
+        select: {
+          id: true,
+          routeId: true,
+          lead_period: true,
+          route: {
+            select: {
+              url: true,
+              method: true,
+              attributes: true,
+              hasWebhook: true,
+            },
+          },
+        },
+      },
+    },
+  });
+};
+
 const addLead = async (req, res) => {
-  let {
+  const {
     name,
     phone,
     email,
@@ -15,9 +65,7 @@ const addLead = async (req, res) => {
     sub4,
     campId,
     apiKey,
-  } = await req.body;
-
-  // console.log("lead body", req.body);
+  } = req.body;
 
   if (!name || !phone || !apiKey || !campId) {
     return res.status(400).json({ error: "Missing required fields" });
@@ -25,97 +73,51 @@ const addLead = async (req, res) => {
 
   const { ip, country } = getIpAndCountry(req);
   const [firstName, lastName] = name.split(" ");
-  phone = String(phone).replace(/\D/g, "");
-  try {
-    const userWithCampaign = await prismaClient.user.findUnique({
-      where: { apiKey },
-      select: {
-        id: true,
-        campaigns: {
-          where: {
-            campId,
-          },
-          select: {
-            id: true,
-            routeId: true,
-            lead_period: true,
-            route: {
-              select: {
-                url: true,
-                method: true,
-                attributes: true,
-              },
-            },
-          },
-        },
-      },
-    });
+  const sanitizedPhone = String(phone).replace(/\D/g, "");
 
+  try {
+    const userWithCampaign = await getUserWithCampaign(apiKey, campId);
+    console.log(userWithCampaign.campaigns);
     if (!userWithCampaign) {
       return res.status(400).json({ error: "Invalid API key" });
     }
 
     const campaign = userWithCampaign.campaigns[0];
-
     if (!campaign) {
       return res.status(400).json({ error: "Invalid campaign ID" });
     }
 
-    const isDuplicate = await checkDuplicateLead(phone, campaign);
-    console.log("duplicate lead", isDuplicate);
+    const isDuplicate = await checkDuplicateLead(sanitizedPhone, campaign);
+    const leadData = {
+      firstName,
+      lastName,
+      phone: sanitizedPhone,
+      email,
+      address,
+      ip,
+      country,
+      status: "Pending",
+      sub1,
+      sub2,
+      sub3,
+      sub4,
+      campaignId: campaign.id,
+      routeId: campaign.routeId,
+      userId: userWithCampaign.id,
+    };
+
     if (isDuplicate) {
-      const duplicateLead = await prismaClient.lead.create({
-        data: {
-          firstName,
-          lastName,
-          phone,
-          email,
-          address,
-          ip,
-          country,
-          status: "Duplicate",
-          sub1,
-          sub2,
-          sub3,
-          sub4,
-          campaignId: campaign.id,
-          routeId: campaign.routeId,
-          userId: userWithCampaign.id,
-        },
-      });
-      return res
-        .status(400)
-        .json({ lead_id: duplicateLead.id, status: "Duplicate" });
+      return await handleDuplicateLead(leadData, res);
     }
 
-    const lead = await prismaClient.lead.create({
-      data: {
-        firstName,
-        lastName,
-        phone,
-        email,
-        address,
-        ip,
-        country,
-        status: "Pending",
-        sub1,
-        sub2,
-        sub3,
-        sub4,
-        campaignId: campaign.id,
-        routeId: campaign.routeId,
-        userId: userWithCampaign.id,
-      },
-    });
-
-    const webhookResponse = await sendWebhook(campaign.route, lead);
-
-    res.status(201).json({ success: true, lead_id: lead.id, status: lead.status,});
+    return await handleNewLead(leadData, userWithCampaign, res);
   } catch (error) {
     console.log(error);
-    res
-      .status(400)
-      .json({ success: false, error: "Unable to create lead", details: error.message });
+    return res.status(400).json({
+      success: false,
+      error: "Unable to create lead",
+      details: error.message,
+    });
   }
 };
 
@@ -139,94 +141,46 @@ const addLeadGet = async (req, res) => {
 
   const { ip, country } = getIpAndCountry(req);
   const [firstName, lastName] = name.split(" ");
-  try {
-    const userWithCampaign = await prismaClient.user.findUnique({
-      where: { apiKey },
-      select: {
-        id: true,
-        campaigns: {
-          where: {
-            campId,
-          },
-          select: {
-            id: true,
-            routeId: true,
-            lead_period: true,
-            route: {
-              select: {
-                url: true,
-                method: true,
-                attributes: true,
-              },
-            },
-          },
-        },
-      },
-    });
+  const sanitizedPhone = String(phone).replace(/\D/g, "");
 
+  try {
+    const userWithCampaign = await getUserWithCampaign(apiKey, campId);
     if (!userWithCampaign) {
       return res.status(400).json({ error: "Invalid API key" });
     }
 
     const campaign = userWithCampaign.campaigns[0];
-
     if (!campaign) {
       return res.status(400).json({ error: "Invalid campaign ID" });
     }
 
-    const isDuplicate = await checkDuplicateLead(phone, campaign);
-    console.log("duplicate lead", isDuplicate);
+    const isDuplicate = await checkDuplicateLead(sanitizedPhone, campaign);
+    const leadData = {
+      firstName,
+      lastName,
+      phone: sanitizedPhone,
+      email,
+      address,
+      ip,
+      country,
+      status: "Pending",
+      sub1,
+      sub2,
+      sub3,
+      sub4,
+      campaignId: campaign.id,
+      routeId: campaign.routeId,
+      userId: userWithCampaign.id,
+    };
+
     if (isDuplicate) {
-      const duplicateLead = await prismaClient.lead.create({
-        data: {
-          firstName,
-          lastName,
-          phone,
-          email,
-          address,
-          ip,
-          country,
-          status: "Duplicate",
-          sub1,
-          sub2,
-          sub3,
-          sub4,
-          campaignId: campaign.id,
-          routeId: campaign.routeId,
-          userId: userWithCampaign.id,
-        },
-      });
-      return res
-        .status(400)
-        .json({ lead_id: duplicateLead.id, status: "Duplicate" });
+      return await handleDuplicateLead(leadData, res);
     }
 
-    const lead = await prismaClient.lead.create({
-      data: {
-        firstName,
-        lastName,
-        phone,
-        email,
-        address,
-        ip,
-        country,
-        status: "Pending",
-        sub1,
-        sub2,
-        sub3,
-        sub4,
-        campaignId: campaign.id,
-        routeId: campaign.routeId,
-        userId: userWithCampaign.id,
-      },
-    });
-
-    const webhookResponse = await sendWebhook(campaign.route, lead);
-
-    res.status(201).json({ lead_id: lead.id, status: lead.status,});
+    return await handleNewLead(leadData, userWithCampaign, res);
   } catch (error) {
     console.log(error);
-    res
+    return res
       .status(400)
       .json({ error: "Unable to create lead", details: error.message });
   }
