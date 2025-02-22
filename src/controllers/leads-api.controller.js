@@ -18,10 +18,10 @@ const handleNewLead = async (leadData, userWithCampaign, res) => {
   const lead = await createLead(leadData);
   if (!lead) {
     return res.status(400).json({ error: "Unable to create lead" });
-  } 
-
+  }
+  
   if (userWithCampaign.campaigns[0].route.hasWebhook) {
-    await sendWebhook(userWithCampaign.route, lead);
+    await sendWebhook(userWithCampaign.campaigns[0].route, lead);
   }
   return res
     .status(201)
@@ -67,7 +67,10 @@ const addLead = async (req, res) => {
     apiKey,
   } = req.body;
 
-  if (!name || !phone || !apiKey || !campId) {
+  if (!apiKey) {
+    return res.status(400).json({ error: "Missing API key" });
+  }
+  if (!name || !phone || !campId) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
