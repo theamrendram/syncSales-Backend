@@ -14,21 +14,36 @@ datasource db {
 }
 
 model User {
-  id             String     @id @unique @default(uuid())
+  id             String      @id @unique @default(uuid())
   firstName      String
   lastName       String
   email          String
   password       String?
   companyName    String?
-  role           String     @default("admin")
-  routes         Route[]
-  campaigns      Campaign[]
+  role           String      @default("admin")
+  apiKey         String      @unique @default("0")
+  subscriptionId String      @default("0000000000")
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
   leads          Lead[]
-  apiKey         String     @unique @default("0")
-  subscriptionId String     @default("0000000000")
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  routes         Route[]
   payments       Payment[]
+  campaigns      Campaign[]
+  webmaster      Webmaster[]
+}
+
+model Webmaster {
+  id        String     @id @default(uuid())
+  firstName String
+  lastName  String
+  email     String
+  password  String?
+  apiKey    String     @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  userId    String
+  user      User       @relation(fields: [userId], references: [id])
+  campaigns Campaign[]
 }
 
 model Route {
@@ -51,19 +66,21 @@ model Route {
 }
 
 model Campaign {
-  id          String   @id @default(uuid())
+  id          String     @id @default(uuid())
   name        String
   userId      String
   campId      String
   manager     String
-  user        User     @relation(fields: [userId], references: [id])
   routeId     String
-  route       Route    @relation(fields: [routeId], references: [id])
-  status      Status   @default(active)
+  webmasterId String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  lead_period Int        @default(90)
+  user        User       @relation(fields: [userId], references: [id])
+  route       Route      @relation(fields: [routeId], references: [id])
+  status      Status     @default(active)
   Lead        Lead[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  lead_period Int      @default(90)
+  webmaster   Webmaster? @relation(fields: [webmasterId], references: [id])
 }
 
 model Seller {

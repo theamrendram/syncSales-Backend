@@ -17,6 +17,7 @@
   const leadsApiRoute = require("./routes/leads-api.route");
   const postbackRoute = require("./routes/postback.route")
   const paymentRoute = require("./routes/payment.route");
+  const webmasterRoute = require("./routes/webmaster.route");
 
   app.use(express.json());
   app.use(cors());
@@ -44,6 +45,7 @@
   app.use("/api/v1/lead", requireAuth(), leadsRoute);
   app.use("/api/v1/postback", postbackRoute);
   app.use("/api/v1/payment", requireAuth(), paymentRoute);
+  app.use("/api/v1/webmaster", requireAuth(), webmasterRoute);
 
   app.get("/test", (req, res) => {
     res.send("test route");

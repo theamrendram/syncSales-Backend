@@ -2,6 +2,8 @@ const prismaClient = require("../utils/prismaClient");
 const { sendWebhook } = require("../utils/sendWebhook");
 const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
 const getIpAndCountry = require("../utils/get-ip-and-country");
+const { clerkClient } = require("@clerk/express");
+
 const getLeads = async (req, res) => {
   const { page = 1, items = 5 } = req.query;
 
@@ -14,7 +16,7 @@ const getLeads = async (req, res) => {
         campaign: true,
       },
     });
-    console.log("leads", leads);
+    // console.log("leads", leads);
     res.json(leads);
   } catch (error) {
     // console.log(error);
@@ -137,27 +139,71 @@ const addLead = async (req, res) => {
 };
 
 const getLeadsByUser = async (req, res) => {
-  const { userId } = req.params;
+  const { userId } = req.auth;
+
   try {
-    const leads = await prismaClient.lead.findMany({
-      where: {
-        userId,
-      },
-      include: {
-        campaign: true,
-        route: {
-          select: {
-            payout: true,
-          },
+    // Fetch user role from Clerk
+    const user = await clerkClient.users.getUser(userId);
+    const role = user.privateMetadata?.role || "admin";
+    console.log("User Role:", role);
+
+    if (role === "admin") {
+      // Fetch all leads for an admin
+      const leads = await prismaClient.lead.findMany({
+        where: { userId },
+        include: {
+          campaign: true,
+          route: { select: { payout: true } },
         },
-      },
-    });
-    console.log("leads by user id", leads);
-    res.json(leads);
+      });
+
+      return res.json(leads);
+    }
+
+    if (role === "webmaster") {
+      // Fetch webmaster ID
+      console.log("Webmaster ID:", userId);
+      const webmaster = await prismaClient.webmaster.findFirst({
+        where: { email: user.email },
+        select: { id: true },
+      });
+
+      if (!webmaster) {
+        console.log("Webmaster not found");
+        return res.status(404).json({ error: "Webmaster not found" });
+      }
+
+      // Fetch campaigns associated with webmaster
+      const campaigns = await prismaClient.campaign.findMany({
+        where: { webmasterId: webmaster.id },
+        select: { id: true },
+      });
+      console.log("Campaigns:", campaigns);
+
+      if (!campaigns.length) {
+        return res.json([]); // Return empty array if no campaigns
+      }
+
+      const campaignIds = campaigns.map((c) => c.id);
+
+      // Fetch leads associated with webmaster's campaigns
+      const leads = await prismaClient.lead.findMany({
+        where: { campaignId: { in: campaignIds } },
+        include: {
+          campaign: true,
+          route: { select: { payout: true } },
+        },
+      });
+
+      return res.json(leads);
+    }
+
+    // If role is not recognized, return an error
+    return res.status(403).json({ error: "Unauthorized role" });
   } catch (error) {
-    console.log(error);
-    res
-      .status(400)
+    console.error("Error fetching leads:", error);
+    return res
+      .status(500)
       .json({ error: "Unable to get leads", details: error.message });
   }
 };
