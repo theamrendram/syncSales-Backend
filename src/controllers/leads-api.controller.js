@@ -19,9 +19,27 @@ const handleNewLead = async (leadData, userWithCampaign, res) => {
   if (!lead) {
     return res.status(400).json({ error: "Unable to create lead" });
   }
-  
+
   if (userWithCampaign.campaigns[0].route.hasWebhook) {
-    await sendWebhook(userWithCampaign.campaigns[0].route, lead);
+    const webhookRes = await sendWebhook(
+      userWithCampaign.campaigns[0].route,
+      lead
+    );
+
+    console.log("webhook response", webhookRes)
+    if (webhookRes.error) {
+      console.log("Error sending webhook:", webhookRes.error);
+    }
+    const updateLead = await prismaClient.lead.update({
+      where: {
+        id: lead.id,
+      },
+      data: {
+        webhookResponse: webhookRes,
+      },
+    });
+
+    console.log("updated lead", updateLead);
   }
   return res
     .status(201)

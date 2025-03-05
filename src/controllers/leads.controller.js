@@ -153,7 +153,7 @@ const getLeadsByUser = async (req, res) => {
         where: { userId },
         include: {
           campaign: true,
-          route: { select: { payout: true } },
+          route: { select: { payout: true, name: true } },
         },
       });
 
