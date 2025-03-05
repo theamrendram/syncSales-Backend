@@ -102,7 +102,7 @@ const getRouteByUser = async (req, res) => {
   try {
     const routes = await prismaClient.route.findMany({
       where: {
-        userId,
+        AND: [{ userId }, { deletedAt: null }],
       },
     });
     res.json(routes);
@@ -116,23 +116,20 @@ const getRouteByUser = async (req, res) => {
 const deleteRouteById = async (req, res) => {
   const { id } = req.params;
 
+  console.log("delete route called...", id);
+
   try {
-    // Convert id if necessary
-    const routeId = String(id);
-
-    // Step 1: Delete associated campaigns only
-    await prismaClient.campaign.deleteMany({
-      where: { routeId },
-    });
-
-    // Step 2: Delete the route itself
-    const deletedRoute = await prismaClient.route.delete({
-      where: { id: routeId },
+    const response = await prismaClient.route.update({
+      where: { id },
+      data: {
+        deletedAt: new Date(),
+      },
     });
 
     return res.status(200).json({
-      message: "Route and associated campaigns deleted successfully",
-      data: deletedRoute,
+      message: "Route deleted successfully",
+      success: true,
+      data: response.id,
     });
   } catch (error) {
     console.error("Error deleting route:", error);
