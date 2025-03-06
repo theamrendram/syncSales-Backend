@@ -7,8 +7,32 @@ const createLead = async (leadData) => {
   return await prismaClient.lead.create({ data: leadData });
 };
 
-const handleDuplicateLead = async (leadData, res) => {
+const handleDuplicateLead = async (leadData, userWithCampaign, res) => {
   const duplicateLead = await createLead({ ...leadData, status: "Duplicate" });
+
+  if (userWithCampaign.campaigns[0].route.hasWebhook) {
+    const webhookRes = await sendWebhook(
+      userWithCampaign.campaigns[0].route,
+      duplicateLead
+    );
+
+    console.log("webhook response", webhookRes);
+    if (webhookRes.error) {
+      console.log("Error sending webhook:", webhookRes.error);
+    }
+
+    const updateLead = await prismaClient.lead.update({
+      where: {
+        id: duplicateLead.id,
+      },
+      data: {
+        webhookResponse: webhookRes,
+      },
+    });
+
+    console.log("updated lead", updateLead);
+  }
+
   return res
     .status(400)
     .json({ lead_id: duplicateLead.id, status: "Duplicate" });
@@ -26,10 +50,11 @@ const handleNewLead = async (leadData, userWithCampaign, res) => {
       lead
     );
 
-    console.log("webhook response", webhookRes)
+    console.log("webhook response", webhookRes);
     if (webhookRes.error) {
       console.log("Error sending webhook:", webhookRes.error);
     }
+
     const updateLead = await prismaClient.lead.update({
       where: {
         id: lead.id,
@@ -41,6 +66,7 @@ const handleNewLead = async (leadData, userWithCampaign, res) => {
 
     console.log("updated lead", updateLead);
   }
+
   return res
     .status(201)
     .json({ success: true, lead_id: lead.id, status: lead.status });
@@ -128,7 +154,7 @@ const addLead = async (req, res) => {
     };
 
     if (isDuplicate) {
-      return await handleDuplicateLead(leadData, res);
+      return await handleDuplicateLead(leadData, userWithCampaign, res);
     }
 
     return await handleNewLead(leadData, userWithCampaign, res);
@@ -195,7 +221,7 @@ const addLeadGet = async (req, res) => {
     };
 
     if (isDuplicate) {
-      return await handleDuplicateLead(leadData, res);
+      return await handleDuplicateLead(leadData, userWithCampaign, res);
     }
 
     return await handleNewLead(leadData, userWithCampaign, res);
