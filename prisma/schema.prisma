@@ -8,22 +8,26 @@ datasource db {
 }
 
 model User {
-  id             String      @id @unique @default(uuid())
-  firstName      String
-  lastName       String
-  email          String
-  password       String?
-  companyName    String?
-  role           String      @default("admin")
-  apiKey         String      @unique @default("0")
-  subscriptionId String      @default("0000000000")
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-  leads          Lead[]
-  routes         Route[]
-  payments       Payment[]
-  campaigns      Campaign[]
-  webmaster      Webmaster[]
+  id           String         @id @unique @default(uuid())
+  firstName    String
+  lastName     String
+  email        String         @unique
+  phone        String?
+  password     String?
+  companyName  String?
+  role         String         @default("user")
+  apiKey       String         @unique @default("0")
+  address      String?
+  plan         String         @default("pro")
+  expiry       String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  leads        Lead[]
+  routes       Route[]
+  payments     Payment[]
+  campaigns    Campaign[]
+  webmaster    Webmaster[]
+  subscription Subscription[]
 }
 
 model Webmaster {
@@ -51,13 +55,13 @@ model Route {
   url         String?
   method      String?
   attributes  Json?
-  userId      String
-  user        User       @relation(fields: [userId], references: [id])
-  campaigns   Campaign[]
-  Lead        Lead[]
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
-  deletedAt   DateTime?  
+  deletedAt   DateTime?
+  userId      String
+  user        User       @relation(fields: [userId], references: [id])
+  Lead        Lead[]
+  campaigns   Campaign[]
 }
 
 model Campaign {
@@ -136,6 +140,16 @@ model Payment {
   description   String? // Optional description of the payment
   receiptUrl    String? // Optional URL to the payment receipt
   metadata      Json? // Optional JSON field for additional payment metadata
+}
+
+model Subscription {
+  id                String @id @default(uuid())
+  razorpayPaymentId String
+  razorpayOrderId   String
+  billingCycle      String
+  plan              String
+  userId            String
+  user              User   @relation(fields: [userId], references: [id])
 }
 
 enum Status {
