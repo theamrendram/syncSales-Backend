@@ -4,6 +4,7 @@ const prismaClient = new PrismaClient();
 
 const addWebmaster = async (req, res) => {
   const { email, password, fullName, campaigns } = await req.body;
+  console.log("adding new webmaster", req.body);
   const { userId } = req.auth;
   try {
     // Create Clerk user for the webmaster

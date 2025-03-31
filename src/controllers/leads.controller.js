@@ -20,7 +20,7 @@ const getLeads = async (req, res) => {
     res.json(leads);
   } catch (error) {
     // console.log(error);
-    res.status(500).json({ error: "Unable to fetch leads", details: error }); // 500 Internal Server Error
+    res.status(500).json({ error: "Unable to fetch leads", details: error });
   }
 };
 
@@ -162,11 +162,12 @@ const getLeadsByUser = async (req, res) => {
 
     if (role === "webmaster") {
       // Fetch webmaster ID
-      console.log("Webmaster ID:", userId);
-      const webmaster = await prismaClient.webmaster.findFirst({
-        where: { email: user.email },
-        select: { id: true },
+      console.log("Webmaster ID:", user.emailAddresses[0].emailAddress);
+      const webmaster = await prismaClient.webmaster.findUnique({
+        where: { email: user.emailAddresses[0].emailAddress },
+        select: { id: true, email: true, campaigns: true },
       });
+      console.log("Webmaster:", webmaster);
 
       if (!webmaster) {
         console.log("Webmaster not found");
