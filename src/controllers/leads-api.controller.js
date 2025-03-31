@@ -3,6 +3,7 @@ const { sendWebhook } = require("../utils/sendWebhook");
 const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
 const getIpAndCountry = require("../utils/get-ip-and-country");
 
+// ----- START utility functions ------
 const createLead = async (leadData) => {
   return await prismaClient.lead.create({ data: leadData });
 };
@@ -96,6 +97,7 @@ const getUserWithCampaign = async (apiKey, campId) => {
     },
   });
 };
+// ----- END utility functions ------
 
 const addLead = async (req, res) => {
   const {
@@ -233,7 +235,32 @@ const addLeadGet = async (req, res) => {
   }
 };
 
+const updateLead = async (req, res) => {
+  const { id, data } = req.body;
+
+  console.log("update lead data", id, data);
+  if (!id || !data) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    const updatedLead = await prismaClient.lead.update({
+      where: { id },
+      data,
+    });
+
+    return res.status(200).json({ success: true, lead: updatedLead });
+  } catch (error) {
+    if (error.code === "P2025") {
+      return res.status(404).json({ error: "Lead not found" });
+    }
+    console.error("Error updating lead:", error);
+    return res.status(500).json({ error: "Failed to update lead." });
+  }
+};
+
 module.exports = {
   addLead,
   addLeadGet,
+  updateLead,
 };
