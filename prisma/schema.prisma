@@ -15,7 +15,8 @@ model User {
   phone        String?
   password     String?
   companyName  String?
-  role         String         @default("user")
+  companyId    String?        @default(uuid())
+  role         String         @default("admin")
   apiKey       String         @unique @default("0")
   address      String?
   plan         String         @default("pro")
@@ -108,6 +109,7 @@ model Lead {
   sub3            String?
   sub4            String?
   userId          String
+  companyId       String?
   date            DateTime  @default(now())
   user            User      @relation(fields: [userId], references: [id])
   routeId         String
@@ -124,6 +126,7 @@ model Lead {
   @@index([routeId])
   @@index([campaignId])
   @@index([phone])
+  @@index([companyId])
 }
 
 model Payment {
