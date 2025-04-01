@@ -5,5 +5,6 @@ const route = express.Router();
 
 route.post("/", addPostback);
 route.get("/", addPostback);
+route.put("/", addPostback);
 
 module.exports = route;

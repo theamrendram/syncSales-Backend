@@ -27,6 +27,7 @@ app.use(express.urlencoded({ extended: true }));
 // leads api
 app.use("/api/v1/leads", leadsApiRoute);
 app.use("/api/v1/subscription", subscriptionRoute);
+app.use("/api/v1/postback", postbackRoute);
 
 app.get("/", (req, res) => {
   res.send("server is running");
@@ -36,7 +37,7 @@ app.get("/unauthenticated", (req, res) => {
   res.send("unauthenticated request");
 });
 
-app.use(clerkMiddleware());
+app.use(clerkMiddleware()); 
 
 app.use("/api/v1/route", requireAuth(), routeRoute);
 app.use("/api/v1/user", userRoute);
@@ -44,7 +45,6 @@ app.use("/api/v1/webhook", requireAuth(), webhookRoute);
 app.use("/api/v1/seller", requireAuth(), sellerRoute);
 app.use("/api/v1/campaign", requireAuth(), campaignRoute);
 app.use("/api/v1/lead", requireAuth(), leadsRoute);
-app.use("/api/v1/postback", postbackRoute);
 app.use("/api/v1/payment", requireAuth(), paymentRoute);
 app.use("/api/v1/webmaster", requireAuth(), webmasterRoute);
 

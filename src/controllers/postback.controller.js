@@ -5,14 +5,22 @@ async function addPostback(req, res) {
   const status = req.query.status;
 
   try {
+    if (
+      !["pending", "approved", "trash", "duplicate"].includes(
+        status.toLowerCase()
+      )
+    ) {
+      return res.status(400).json({ error: "Invalid status" });
+    }
+
     const lead = await prismaClient.lead.findUnique({
       where: {
         id: lead_id,
       },
     });
 
-    if(!lead) {
-    res.status(400).json({error: "No lead found"})
+    if (!lead) {
+      return res.status(400).json({ error: "No lead found" });
     }
 
     const updatedLead = await prismaClient.lead.update({
@@ -20,7 +28,7 @@ async function addPostback(req, res) {
         id: lead_id,
       },
       data: {
-        status,
+        status: status.charAt(0).toUpperCase() + status.slice(1),
       },
     });
 
