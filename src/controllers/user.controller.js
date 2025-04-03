@@ -5,7 +5,6 @@ const addUser = async (req, res) => {
     req.body;
   console.log(req.body);
   try {
-
     const userExists = await prismaClient.user.findUnique({
       where: {
         id: userId,
@@ -96,8 +95,23 @@ const getUserAPI = async (req, res) => {
   }
 };
 
+const getUser = async (req, res) => {
+  const { userId } = req.auth;
+  try {
+    const user = await prismaClient.user.findUnique({
+      where: {
+        id: userId,
+      },
+    });
+    return res.status(200).json({ data: user });
+  } catch (error) {
+    return res.status(500).json({ error: error });
+  }
+};
+
 module.exports = {
   addUser,
+  getUser,
   getAllUsers,
   addUserAPI,
   getUserAPI,
