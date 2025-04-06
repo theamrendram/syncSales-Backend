@@ -4,14 +4,57 @@ const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
 const getIpAndCountry = require("../utils/get-ip-and-country");
 const { clerkClient } = require("@clerk/express");
 
-const transformLeadsToChartData = (leads) => {
-  if (!leads || !Array.isArray(leads)) return [];
+  const transformLeadsToChartData = (leads) => {
+    // Group leads by date
+    const leadsByDate = leads.reduce((acc, lead) => {
+      const date = new Date(lead.date).toISOString().split("T")[0];
 
-  return leads.reduce((acc, lead) => {
-    const date = new Date(lead.date).toISOString().split("T")[0];
-    acc[date] = (acc[date] || 0) + 1;
-    return acc;
-  }, {});
+      if (!acc[date]) {
+        acc[date] = {
+          date: lead.date,
+          lead: 0,
+        };
+      }
+
+      // Increment lead count for the date
+      acc[date].lead += 1;
+
+      return acc;
+    }, {});
+
+    // Convert to array and sort by date
+    return Object.values(leadsByDate).sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+  };
+const getLeadsGroupedByDateRouteCampaign = async (leads) => {
+  const grouped = {};
+
+  leads.forEach((lead) => {
+    const date = lead.date.toISOString().split("T")[0];
+    const routeName = lead.route?.name || "Unknown Route";
+    const campaignName = lead.campaign?.name || "Unknown Campaign";
+
+    const key = `${date}_${routeName}`;
+
+    if (!grouped[key]) {
+      grouped[key] = {
+        date,
+        route: routeName,
+        campaigns: new Set(),
+        count: 0,
+      };
+    }
+
+    grouped[key].campaigns.add(campaignName);
+    grouped[key].count += 1;
+  });
+
+  // Convert campaigns Set to Array
+  return Object.values(grouped).map((item) => ({
+    ...item,
+    campaigns: Array.from(item.campaigns),
+  }));
 };
 
 const getLeads = async (req, res) => {
@@ -274,9 +317,14 @@ const getChartData = async (req, res) => {
       return res.status(400).json({ error: "User ID not found" });
     }
 
-    // Get all required data in parallel
     const [leads, campaigns, routes] = await Promise.all([
-      prismaClient.lead.findMany({ where: { userId } }),
+      prismaClient.lead.findMany({
+        where: { userId },
+        include: {
+          campaign: { select: { name: true } },
+          route: { select: { payout: true, name: true } },
+        },
+      }),
       prismaClient.campaign.findMany({
         where: { userId },
         select: { id: true, name: true },
@@ -287,14 +335,10 @@ const getChartData = async (req, res) => {
       }),
     ]);
 
-    const chartData = transformLeadsToChartData(leads);
     const responseData = {
-      campaigns,
-      routes,
-      chartData,
+      newChartData:await getLeadsGroupedByDateRouteCampaign(leads),
       totalLeads: leads.length,
     };
-
     res.json(responseData);
   } catch (error) {
     console.error("Error getting chart data:", error);
@@ -302,7 +346,7 @@ const getChartData = async (req, res) => {
       error: "Unable to get chart data",
       details: error.message,
     });
-  }
+  } 
 };
 
 module.exports = {
