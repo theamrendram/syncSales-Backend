@@ -291,10 +291,33 @@ const getLeadsByUser = async (req, res) => {
     }
 
     const leads = await prismaClient.lead.findMany({
-      where: { userId },
-      include: {
-        campaign: true,
-        route: { select: { payout: true, name: true } },
+      where,
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        email: true,
+        status: true,
+        userId: true,
+        date: true,
+        routeId: true,
+        campaignId: true,
+        webhookResponse: true,
+        createdAt: true,
+        updatedAt: true,
+        campaign: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        route: {
+          select: {
+            payout: true,
+            name: true,
+          },
+        },
       },
     });
 
@@ -416,8 +439,57 @@ const getChartData = async (req, res) => {
       return res.status(400).json({ error: "User ID not found" });
     }
 
+    // Get user info first
+    const user = await prismaClient.user.findUnique({
+      where: { id: userId },
+      select: { role: true, companyId: true, email: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Setup the where clause based on user role
+    let where = {};
+
+    if (user.role === "admin") {
+      if (!user.companyId) {
+        return res
+          .status(400)
+          .json({ error: "Company ID not found for admin" });
+      }
+      where = { user: { companyId: user.companyId } };
+    } else if (user.role === "webmaster") {
+      const webmaster = await prismaClient.webmaster.findUnique({
+        where: { email: user.email },
+        select: { campaigns: { select: { id: true } } },
+      });
+
+      if (!webmaster) {
+        return res.status(404).json({ error: "Webmaster not found" });
+      }
+
+      const campaignIds = webmaster.campaigns.map((c) => c.id);
+      if (!campaignIds.length) {
+        return res.json({
+          newChartData: [],
+          totalLeads: 0,
+          metricData: {
+            todaysLeads: 0,
+            yesterdaysLeads: 0,
+            lastMonthLeads: 0,
+            todaysExpectedRevenue: 0,
+          },
+        });
+      }
+
+      where = { campaignId: { in: campaignIds } };
+    } else {
+      return res.status(403).json({ error: "Unauthorized role" });
+    }
+
     const leads = await prismaClient.lead.findMany({
-      where: { userId },
+      where,
       include: {
         campaign: { select: { name: true } },
         route: { select: { payout: true, name: true } },
@@ -429,6 +501,7 @@ const getChartData = async (req, res) => {
       totalLeads: leads.length,
       metricData: chartMetrics(leads),
     };
+
     res.json(responseData);
   } catch (error) {
     console.error("Error getting chart data:", error);
