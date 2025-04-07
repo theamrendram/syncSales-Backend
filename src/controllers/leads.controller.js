@@ -2,31 +2,31 @@ const prismaClient = require("../utils/prismaClient");
 const { sendWebhook } = require("../utils/sendWebhook");
 const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
 const getIpAndCountry = require("../utils/get-ip-and-country");
-const { clerkClient } = require("@clerk/express");
+const { chartMetrics } = require("../utils/chart-functions");
 
-  const transformLeadsToChartData = (leads) => {
-    // Group leads by date
-    const leadsByDate = leads.reduce((acc, lead) => {
-      const date = new Date(lead.date).toISOString().split("T")[0];
+const transformLeadsToChartData = (leads) => {
+  // Group leads by date
+  const leadsByDate = leads.reduce((acc, lead) => {
+    const date = new Date(lead.date).toISOString().split("T")[0];
 
-      if (!acc[date]) {
-        acc[date] = {
-          date: lead.date,
-          lead: 0,
-        };
-      }
+    if (!acc[date]) {
+      acc[date] = {
+        date: lead.date,
+        lead: 0,
+      };
+    }
 
-      // Increment lead count for the date
-      acc[date].lead += 1;
+    // Increment lead count for the date
+    acc[date].lead += 1;
 
-      return acc;
-    }, {});
+    return acc;
+  }, {});
 
-    // Convert to array and sort by date
-    return Object.values(leadsByDate).sort(
-      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-    );
-  };
+  // Convert to array and sort by date
+  return Object.values(leadsByDate).sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+  );
+};
 const getLeadsGroupedByDateRouteCampaign = async (leads) => {
   const grouped = {};
 
@@ -250,11 +250,11 @@ const addLead = async (req, res) => {
 const getLeadsByUser = async (req, res) => {
   try {
     const { userId } = req.auth;
+    console.log("User ID from auth:", userId);
     if (!userId) {
       return res.status(400).json({ error: "User ID not found" });
     }
 
-    // Get user details
     const user = await prismaClient.user.findUnique({
       where: { id: userId },
       select: { role: true, companyId: true, email: true },
@@ -264,7 +264,6 @@ const getLeadsByUser = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Build where clause based on user role
     let where = {};
     if (user.role === "admin") {
       if (!user.companyId) {
@@ -291,19 +290,121 @@ const getLeadsByUser = async (req, res) => {
       return res.status(403).json({ error: "Unauthorized role" });
     }
 
-    // Get leads with proper includes
     const leads = await prismaClient.lead.findMany({
-      where,
+      where: {
+        id: userId,
+      },
       include: {
         campaign: true,
         route: { select: { payout: true, name: true } },
       },
     });
 
-    res.json(leads);
+    console.log("Leads for user:", leads);
+    res.status(200).json("leads");
   } catch (error) {
     console.error("Error fetching user leads:", error);
     res.status(500).json({
+      error: "Unable to get leads",
+      details: error.message,
+    });
+  }
+};
+
+const getLeadsByUserPagination = async (req, res) => {
+  const { search = "", page = 1, limit = 10, status = "all" } = req.query;
+  const pageNumber = Math.max(Number(page), 1);
+  const take = Number(limit);
+  const skip = (pageNumber - 1) * take;
+
+  try {
+    const { userId } = req.auth;
+    if (!userId) return res.status(400).json({ error: "User ID not found" });
+
+    const user = await prismaClient.user.findUnique({
+      where: { id: userId },
+      select: { role: true, companyId: true, email: true },
+    });
+
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    let where = {};
+
+    if (user.role === "admin") {
+      if (!user.companyId)
+        return res
+          .status(400)
+          .json({ error: "Company ID not found for admin" });
+      where.user = { companyId: user.companyId };
+    } else if (user.role === "webmaster") {
+      const webmaster = await prismaClient.webmaster.findUnique({
+        where: { email: user.email },
+        select: {
+          campaigns: {
+            select: { id: true },
+          },
+        },
+      });
+
+      if (!webmaster)
+        return res.status(404).json({ error: "Webmaster not found" });
+
+      const campaignIds = webmaster.campaigns.map((c) => c.id);
+      if (!campaignIds.length) {
+        return res.json({
+          data: [],
+          total: 0,
+          page: pageNumber,
+          totalPages: 0,
+        });
+      }
+
+      where.campaignId = { in: campaignIds };
+    } else {
+      return res.status(403).json({ error: "Unauthorized role" });
+    }
+
+    // Search filter
+    if (search) {
+      where.OR = [
+        { firstName: { contains: search, mode: "insensitive" } },
+        { lastName: { contains: search, mode: "insensitive" } },
+        { phone: { contains: search, mode: "insensitive" } },
+        { email: { contains: search, mode: "insensitive" } },
+      ];
+    }
+
+    // Status filter
+    if (status !== "all") {
+      where.status = status;
+    }
+
+    const [total, leads] = await Promise.all([
+      prismaClient.lead.count({ where }),
+      prismaClient.lead.findMany({
+        where,
+        skip,
+        take,
+        orderBy: { createdAt: "desc" },
+        include: {
+          campaign: { select: { name: true } },
+          route: { select: { payout: true, name: true } },
+        },
+      }),
+    ]);
+
+    console.log("Total leads:", total);
+    console.log("Leads:", leads);
+
+    return res.json({
+      data: leads,
+      total,
+      page: Number(page),
+      totalPages: Math.ceil(total / take),
+    });
+  } catch (error) {
+    console.error("Error fetching user leads:", error);
+    return res.status(500).json({
       error: "Unable to get leads",
       details: error.message,
     });
@@ -317,27 +418,18 @@ const getChartData = async (req, res) => {
       return res.status(400).json({ error: "User ID not found" });
     }
 
-    const [leads, campaigns, routes] = await Promise.all([
-      prismaClient.lead.findMany({
-        where: { userId },
-        include: {
-          campaign: { select: { name: true } },
-          route: { select: { payout: true, name: true } },
-        },
-      }),
-      prismaClient.campaign.findMany({
-        where: { userId },
-        select: { id: true, name: true },
-      }),
-      prismaClient.route.findMany({
-        where: { userId },
-        select: { id: true, name: true },
-      }),
-    ]);
+    const leads = await prismaClient.lead.findMany({
+      where: { userId },
+      include: {
+        campaign: { select: { name: true } },
+        route: { select: { payout: true, name: true } },
+      },
+    });
 
     const responseData = {
-      newChartData:await getLeadsGroupedByDateRouteCampaign(leads),
+      newChartData: await getLeadsGroupedByDateRouteCampaign(leads),
       totalLeads: leads.length,
+      metricData: chartMetrics(leads),
     };
     res.json(responseData);
   } catch (error) {
@@ -346,7 +438,7 @@ const getChartData = async (req, res) => {
       error: "Unable to get chart data",
       details: error.message,
     });
-  } 
+  }
 };
 
 module.exports = {
@@ -354,4 +446,5 @@ module.exports = {
   addLead,
   getLeadsByUser,
   getChartData,
+  getLeadsByUserPagination,
 };
