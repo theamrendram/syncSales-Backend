@@ -321,7 +321,7 @@ const getLeadsByUser = async (req, res) => {
       },
     });
 
-    console.log("Leads for user:", leads);
+    console.log("Leads for user:", leads.length);
     res.status(200).json(leads);
   } catch (error) {
     console.error("Error fetching user leads:", error);
@@ -512,10 +512,120 @@ const getChartData = async (req, res) => {
   }
 };
 
+const getMonthlyLeadsByUser = async (req, res) => {
+  try {
+    const { userId } = req.auth;
+    console.log("User ID from auth:", userId);
+    if (!userId) {
+      return res.status(400).json({ error: "User ID not found" });
+    }
+
+    const user = await prismaClient.user.findUnique({
+      where: { id: userId },
+      select: { role: true, companyId: true, email: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    let where = {};
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+      999
+    );
+
+    if (user.role === "admin") {
+      if (!user.companyId) {
+        return res
+          .status(400)
+          .json({ error: "Company ID not found for admin" });
+      }
+      where = {
+        user: { companyId: user.companyId },
+        createdAt: {
+          gte: startOfMonth,
+          lte: endOfMonth,
+        },
+      };
+    } else if (user.role === "webmaster") {
+      const webmaster = await prismaClient.webmaster.findUnique({
+        where: { email: user.email },
+        select: { campaigns: { select: { id: true } } },
+      });
+
+      if (!webmaster) {
+        return res.status(404).json({ error: "Webmaster not found" });
+      }
+
+      const campaignIds = webmaster.campaigns.map((c) => c.id);
+      if (!campaignIds.length) return res.json([]);
+
+      where = {
+        campaignId: { in: campaignIds },
+        createdAt: {
+          gte: startOfMonth,
+          lte: endOfMonth,
+        },
+      };
+    } else {
+      return res.status(403).json({ error: "Unauthorized role" });
+    }
+
+    const leads = await prismaClient.lead.findMany({
+      where,
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        email: true,
+        status: true,
+        userId: true,
+        date: true,
+        routeId: true,
+        campaignId: true,
+        webhookResponse: true,
+        createdAt: true,
+        updatedAt: true,
+        campaign: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        route: {
+          select: {
+            payout: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    console.log("Monthly leads for user:", leads.length);
+    res.status(200).json(leads);
+  } catch (error) {
+    console.error("Error fetching monthly leads:", error);
+    res.status(500).json({
+      error: "Unable to get monthly leads",
+      details: error.message,
+    });
+  }
+};
+
 module.exports = {
   getLeads,
   addLead,
   getLeadsByUser,
   getChartData,
   getLeadsByUserPagination,
+  getMonthlyLeadsByUser,
 };
