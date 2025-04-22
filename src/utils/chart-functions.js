@@ -23,6 +23,7 @@ const assignColor = (() => {
     return colorMap[campaign];
   };
 })();
+
 function chartMetrics(leads) {
   const today = new Date();
   const formattedToday = today.toISOString().split("T")[0];
@@ -96,4 +97,50 @@ function chartMetrics(leads) {
   };
 }
 
-module.exports = { chartMetrics };
+function generateExtendedReport(leads) {
+  const reportMap = new Map();
+
+  leads.forEach((lead) => {
+    const date = new Date(lead.date).toISOString().split("T")[0];
+
+    // ✅ Safe access using optional chaining and fallback values
+    const route = lead.route?.name || "Unknown Route";
+    const routeId = lead.route?.routeId || "00";
+    const campaign = lead.campaign?.name || "Unknown Campaign";
+    const campId = lead.campaign?.campId || "00";
+    const payout = lead.route?.payout || 0;
+
+    const key = `${date}|${route}|${campaign}`;
+
+    if (!reportMap.has(key)) {
+      reportMap.set(key, {
+        date,
+        route,
+        routeId,
+        campaign,
+        campId,
+        leads: 0,
+        revenue: 0,
+        duplicates: 0,
+        pending: 0,
+      });
+    }
+
+    const reportItem = reportMap.get(key);
+    reportItem.leads += 1;
+
+    if (lead.status === "Duplicate") {
+      reportItem.duplicates += 1;
+    } else if (lead.status === "Pending") {
+      reportItem.pending += 1;
+    }
+
+    reportItem.revenue += payout;
+  });
+
+  return Array.from(reportMap.values());
+}
+
+module.exports = { chartMetrics, generateExtendedReport };
+
+// {date, route, campaign, leads, revenue, duplicates}
