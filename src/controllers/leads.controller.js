@@ -2,7 +2,10 @@ const prismaClient = require("../utils/prismaClient");
 const { sendWebhook } = require("../utils/sendWebhook");
 const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
 const getIpAndCountry = require("../utils/get-ip-and-country");
-const { chartMetrics } = require("../utils/chart-functions");
+const {
+  chartMetrics,
+  generateExtendedReport,
+} = require("../utils/chart-functions");
 
 const transformLeadsToChartData = (leads) => {
   // Group leads by date
@@ -337,7 +340,6 @@ const getLeadsByUserPagination = async (req, res) => {
   const pageNumber = Math.max(Number(page), 1);
   const take = Number(limit);
   const skip = (pageNumber - 1) * take;
-
   try {
     const { userId } = req.auth;
     if (!userId) return res.status(400).json({ error: "User ID not found" });
@@ -415,10 +417,9 @@ const getLeadsByUserPagination = async (req, res) => {
     ]);
 
     console.log("Total leads:", total);
-    console.log("Leads:", leads);
 
     return res.json({
-      data: leads,
+      leads: leads,
       total,
       page: Number(page),
       totalPages: Math.ceil(total / take),
@@ -491,15 +492,16 @@ const getChartData = async (req, res) => {
     const leads = await prismaClient.lead.findMany({
       where,
       include: {
-        campaign: { select: { name: true } },
-        route: { select: { payout: true, name: true } },
+        campaign: { select: { name: true, campId: true } },
+        route: { select: { payout: true, name: true, routeId: true } },
       },
     });
-
+    const extendedReport = generateExtendedReport(leads);
     const responseData = {
       newChartData: await getLeadsGroupedByDateRouteCampaign(leads),
       totalLeads: leads.length,
       metricData: chartMetrics(leads),
+      extendedReport,
     };
 
     res.json(responseData);
