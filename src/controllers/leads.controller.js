@@ -517,8 +517,9 @@ const getChartData = async (req, res) => {
 const getMonthlyLeadsByUser = async (req, res) => {
   try {
     const { userId } = req.auth;
-    console.log("User ID from auth:", userId);
+    console.log("User ID from auth monthly:", userId);
     if (!userId) {
+      console.log("User ID not found");
       return res.status(400).json({ error: "User ID not found" });
     }
 
@@ -528,6 +529,7 @@ const getMonthlyLeadsByUser = async (req, res) => {
     });
 
     if (!user) {
+      console.log("User not found");
       return res.status(404).json({ error: "User not found" });
     }
 
@@ -564,6 +566,7 @@ const getMonthlyLeadsByUser = async (req, res) => {
       });
 
       if (!webmaster) {
+        console.log("Webmaster not found");
         return res.status(404).json({ error: "Webmaster not found" });
       }
 
@@ -626,7 +629,7 @@ const getMonthlyLeadsByUser = async (req, res) => {
 const getPastTenDaysLeadsByUser = async (req, res) => {
   try {
     const { userId } = req.auth;
-    console.log("User ID from auth:", userId);
+    console.log("User ID from auth 10 days:", userId);
     if (!userId) {
       return res.status(400).json({ error: "User ID not found" });
     }

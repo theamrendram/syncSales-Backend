@@ -18,6 +18,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "geoip-lite": "^1.4.10",
+    "json2csv": "^6.0.0-alpha.2",
     "razorpay": "^2.9.5",
     "uuid": "^10.0.0"
   },

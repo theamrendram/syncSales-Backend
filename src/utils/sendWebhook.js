@@ -14,8 +14,7 @@ const sendWebhook = async (route, lead) => {
       } else if (attribute.isCustom) {
         // Handle custom body attributes
         acc[attribute.param] = attribute.value;
-      }
-      else {
+      } else {
         // Map lead data to body attribute
         acc[attribute.value] = lead[attribute.param];
       }
@@ -25,16 +24,13 @@ const sendWebhook = async (route, lead) => {
 
   // Build header parameters
   const headerParams = attributes.reduce((acc, attribute) => {
-    if (attribute.type === "header" && attribute.isCustom) {
-      // Add custom header
-      acc[attribute.param] = attribute.value;
+    if (attribute.type === "header") {
+      acc[attribute.param] = attribute.value; // Remove isCustom check
     }
     return acc;
   }, {});
 
-  console.log("bodyParams:", bodyParams);
   console.log("headerParams:", headerParams);
-
   try {
     // Make the webhook request
     const response = await axios({
