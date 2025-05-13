@@ -518,6 +518,7 @@ const getMonthlyLeadsByUser = async (req, res) => {
   try {
     const { userId } = req.auth;
     console.log("User ID from auth monthly:", userId);
+
     if (!userId) {
       console.log("User ID not found");
       return res.status(400).json({ error: "User ID not found" });
@@ -535,16 +536,8 @@ const getMonthlyLeadsByUser = async (req, res) => {
 
     let where = {};
     const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endOfMonth = new Date(
-      now.getFullYear(),
-      now.getMonth() + 1,
-      0,
-      23,
-      59,
-      59,
-      999
-    );
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(now.getDate() - 30);
 
     if (user.role === "admin") {
       if (!user.companyId) {
@@ -552,11 +545,12 @@ const getMonthlyLeadsByUser = async (req, res) => {
           .status(400)
           .json({ error: "Company ID not found for admin" });
       }
+
       where = {
         user: { companyId: user.companyId },
         createdAt: {
-          gte: startOfMonth,
-          lte: endOfMonth,
+          gte: thirtyDaysAgo,
+          lte: now,
         },
       };
     } else if (user.role === "webmaster") {
@@ -576,8 +570,8 @@ const getMonthlyLeadsByUser = async (req, res) => {
       where = {
         campaignId: { in: campaignIds },
         createdAt: {
-          gte: startOfMonth,
-          lte: endOfMonth,
+          gte: thirtyDaysAgo,
+          lte: now,
         },
       };
     } else {
@@ -615,12 +609,12 @@ const getMonthlyLeadsByUser = async (req, res) => {
       },
     });
 
-    console.log("Monthly leads for user:", leads.length);
+    console.log("Leads from past 30 days for user:", leads.length);
     res.status(200).json(leads);
   } catch (error) {
-    console.error("Error fetching monthly leads:", error);
+    console.error("Error fetching leads from past 30 days:", error);
     res.status(500).json({
-      error: "Unable to get monthly leads",
+      error: "Unable to get leads from past 30 days",
       details: error.message,
     });
   }

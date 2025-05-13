@@ -35,7 +35,7 @@ model Webmaster {
   id        String     @id @default(uuid())
   firstName String
   lastName  String
-  email     String    @unique
+  email     String     @unique
   password  String?
   apiKey    String     @unique
   createdAt DateTime   @default(now())
@@ -146,15 +146,31 @@ model Payment {
 }
 
 model Subscription {
-  id                String @id @default(uuid())
-  razorpayPaymentId String
-  razorpayOrderId   String
-  billingCycle      String
-  plan              String
-  userId            String
-  user              User   @relation(fields: [userId], references: [id])
+  id                     String   @id @default(uuid())
+  razorpaySubscriptionId String   @unique
+  razorpayPaymentId      String
+  customerEmail          String
+  billingCycle           String
+  plan                   String
+  status                 SubscriptionStatus @default(active)
+  isTrial                Boolean  @default(false)
+  startDate              DateTime @default(now())
+  endDate                DateTime
+  userId                 String?
+  user                   User?     @relation(fields: [userId], references: [id])
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([razorpaySubscriptionId])
+  @@index([status])
 }
 
+enum SubscriptionStatus {
+  active
+  trialing
+  cancelled
+  expired
+}
 enum Status {
   active
   inactive
