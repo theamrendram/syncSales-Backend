@@ -29,6 +29,7 @@ app.use("/api/v1/leads", leadsApiRoute);
 app.use("/api/v1/payment", paymentRoute);
 app.use("/api/v1/postback", postbackRoute);
 app.use("/api/v1/subscription", subscriptionRoute);
+app.use("/api/v1/user", userRoute);
 
 app.get("/", (req, res) => {
   res.send("server is running");
@@ -41,7 +42,6 @@ app.get("/unauthenticated", (req, res) => {
 app.use(clerkMiddleware());
 
 app.use("/api/v1/route", requireAuth(), routeRoute);
-app.use("/api/v1/user", userRoute);
 app.use("/api/v1/webhook", requireAuth(), webhookRoute);
 app.use("/api/v1/seller", requireAuth(), sellerRoute);
 app.use("/api/v1/campaign", requireAuth(), campaignRoute);

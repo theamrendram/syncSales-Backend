@@ -1,9 +1,15 @@
 const prismaClient = require("../utils/prismaClient");
 const { generateKey } = require("../utils/generate-key");
 const addUser = async (req, res) => {
-  const { firstName, lastName, email, password, companyName, role, userId } =
-    req.body;
-  console.log(req.body);
+  const {
+    firstName,
+    lastName,
+    email,
+    password = "",
+    companyName,
+    role,
+    userId,
+  } = req.body;
   try {
     const userExists = await prismaClient.user.findUnique({
       where: {
