@@ -4,12 +4,40 @@ const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
 const getIpAndCountry = require("../utils/get-ip-and-country");
 
 // ----- START utility functions ------
-const createLead = async (leadData) => {
-  return await prismaClient.lead.create({ data: leadData });
+const createLead = async (leadData, userId) => {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const [leadResult, usageResult] = await Promise.allSettled([
+    prismaClient.lead.create({ data: leadData }),
+    prismaClient.leadUsage.update({
+      where: {
+        userId_date: {
+          userId: userId,
+          date: today,
+        },
+      },
+      data: {
+        count: {
+          increment: 1,
+        },
+      },
+    }),
+  ]);
+
+  if (leadResult.status === "fulfilled") {
+    return leadResult.value;
+  } else {
+    console.error("Lead creation failed:", leadResult.reason);
+    throw new Error("Lead creation failed");
+  }
 };
 
+
 const handleDuplicateLead = async (leadData, userWithCampaign, res) => {
-  const duplicateLead = await createLead({ ...leadData, status: "Duplicate" });
+  const duplicateLead = await createLead(
+    { ...leadData, status: "Duplicate" },
+    userWithCampaign.id
+  );
 
   if (userWithCampaign.campaigns[0].route.hasWebhook) {
     const webhookRes = await sendWebhook(
@@ -17,7 +45,6 @@ const handleDuplicateLead = async (leadData, userWithCampaign, res) => {
       duplicateLead
     );
 
-    console.log("webhook response", webhookRes);
     if (webhookRes.error) {
       console.log("Error sending webhook:", webhookRes.error);
     }
@@ -30,8 +57,6 @@ const handleDuplicateLead = async (leadData, userWithCampaign, res) => {
         webhookResponse: webhookRes,
       },
     });
-
-    console.log("updated lead", updateLead);
   }
 
   return res
@@ -40,7 +65,7 @@ const handleDuplicateLead = async (leadData, userWithCampaign, res) => {
 };
 
 const handleNewLead = async (leadData, userWithCampaign, res) => {
-  const lead = await createLead(leadData);
+  const lead = await createLead(leadData, userWithCampaign.id);
   if (!lead) {
     return res.status(400).json({ error: "Unable to create lead" });
   }
@@ -64,8 +89,6 @@ const handleNewLead = async (leadData, userWithCampaign, res) => {
         webhookResponse: webhookRes,
       },
     });
-
-    console.log("updated lead", updateLead);
   }
 
   return res
@@ -126,7 +149,6 @@ const addLead = async (req, res) => {
 
   try {
     const userWithCampaign = await getUserWithCampaign(apiKey, campId);
-    console.log(userWithCampaign.campaigns);
     if (!userWithCampaign) {
       return res.status(400).json({ error: "Invalid API key" });
     }

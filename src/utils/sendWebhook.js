@@ -30,7 +30,6 @@ const sendWebhook = async (route, lead) => {
     return acc;
   }, {});
 
-  console.log("headerParams:", headerParams);
   try {
     // Make the webhook request
     const response = await axios({

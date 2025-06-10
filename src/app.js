@@ -4,7 +4,8 @@ dotenv.config();
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const { clerkMiddleware, requireAuth, clerkClient } = require("@clerk/express");
-
+const { LeadsLimiter } = require("./middlewares/rate-limiter.middleware");
+const { checkUserPlan } = require("./utils/check-user-plan");
 const app = express();
 
 // Routes
@@ -25,7 +26,7 @@ app.use(cors());
 app.use(express.urlencoded({ extended: true }));
 
 // leads api
-app.use("/api/v1/leads", leadsApiRoute);
+app.use("/api/v1/leads", LeadsLimiter, checkUserPlan, leadsApiRoute);
 app.use("/api/v1/payment", paymentRoute);
 app.use("/api/v1/postback", postbackRoute);
 app.use("/api/v1/subscription", subscriptionRoute);
@@ -44,12 +45,8 @@ app.use("/api/v1/route", requireAuth(), routeRoute);
 app.use("/api/v1/webhook", requireAuth(), webhookRoute);
 app.use("/api/v1/seller", requireAuth(), sellerRoute);
 app.use("/api/v1/campaign", requireAuth(), campaignRoute);
-app.use("/api/v1/lead", requireAuth(), leadsRoute);
 app.use("/api/v1/webmaster", requireAuth(), webmasterRoute);
-
-app.get("/test", (req, res) => {
-  res.send("test route");
-});
+app.use("/api/v1/lead", requireAuth(), leadsRoute);
 
 // test route for webhook
 app.post("/webhook", (req, res) => {

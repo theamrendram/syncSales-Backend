@@ -8,27 +8,46 @@ datasource db {
 }
 
 model User {
-  id           String         @id @unique @default(uuid())
-  firstName    String
-  lastName     String
-  email        String         @unique
-  phone        String?
-  password     String?
-  companyName  String?
-  companyId    String?        @default(uuid())
-  role         String         @default("admin")
-  apiKey       String         @unique @default("0")
-  address      String?
-  plan         String         @default("pro")
-  expiry       String?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  id          String   @id @default(uuid())
+  firstName   String
+  lastName    String
+  email       String   @unique
+  phone       String?
+  password    String?
+  companyName String?
+  companyId   String?  @default(uuid())
+  role        String   @default("admin")
+  apiKey      String   @unique @default("0")
+  address     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
   leads        Lead[]
   routes       Route[]
+  userPlan     UserPlan?
   payments     Payment[]
   campaigns    Campaign[]
   webmaster    Webmaster[]
   subscription Subscription[]
+}
+
+model UserPlan {
+  id              String    @id @default(uuid())
+  userId          String    @unique
+  name            String // Optional: Name like "Pro", "Basic", etc.
+  price           Float
+  currency        String
+  billingCycle    String // e.g., "monthly", "yearly"
+  maxWebmasters   Int
+  dailyLeadsLimit Int
+  features        Json?
+  isTrial         Boolean   @default(false)
+  startDate       DateTime  @default(now())
+  endDate         DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
 }
 
 model Webmaster {
@@ -129,6 +148,15 @@ model Lead {
   @@index([companyId])
 }
 
+model LeadUsage {
+  id     String   @default(uuid())
+  userId String
+  date   DateTime
+  count  Int      @default(1)
+
+  @@unique([userId, date])
+}
+
 model Payment {
   id            String   @id @default(uuid())
   amount        Float
@@ -146,20 +174,20 @@ model Payment {
 }
 
 model Subscription {
-  id                     String   @id @default(uuid())
-  razorpaySubscriptionId String   @unique
+  id                     String             @id @default(uuid())
+  razorpaySubscriptionId String             @unique
   razorpayPaymentId      String
   customerEmail          String
   billingCycle           String
   plan                   String
   status                 SubscriptionStatus @default(active)
-  isTrial                Boolean  @default(false)
-  startDate              DateTime @default(now())
+  isTrial                Boolean            @default(false)
+  startDate              DateTime           @default(now())
   endDate                DateTime
   userId                 String?
-  user                   User?     @relation(fields: [userId], references: [id])
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  user                   User?              @relation(fields: [userId], references: [id])
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
 
   @@index([razorpaySubscriptionId])
   @@index([status])
@@ -171,6 +199,7 @@ enum SubscriptionStatus {
   cancelled
   expired
 }
+
 enum Status {
   active
   inactive
