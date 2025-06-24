@@ -20,6 +20,8 @@ const postbackRoute = require("./routes/postback.route");
 const paymentRoute = require("./routes/payment.route");
 const webmasterRoute = require("./routes/webmaster.route");
 const subscriptionRoute = require("./routes/subscription.route");
+const organizationRoute = require("./routes/organization.route");
+const roleRoute = require("./routes/role.route");
 
 app.use(express.json());
 app.use(cors());
@@ -47,6 +49,10 @@ app.use("/api/v1/seller", requireAuth(), sellerRoute);
 app.use("/api/v1/campaign", requireAuth(), campaignRoute);
 app.use("/api/v1/webmaster", requireAuth(), webmasterRoute);
 app.use("/api/v1/lead", requireAuth(), leadsRoute);
+
+// Organization and role routes
+app.use("/api/v1/organization", requireAuth(), organizationRoute);
+app.use("/api/v1/organization", requireAuth(), roleRoute);
 
 // test route for webhook
 app.post("/webhook", (req, res) => {
