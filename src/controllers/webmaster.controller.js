@@ -82,9 +82,65 @@ const getWebmastersByUser = async (req, res) => {
     });
     console.log("Webmasters found:", webmasters);
     res.status(200).json(webmasters);
-  } catch {
-    res.status(400).json({ error: "Unable to get webmasters" });
+  } catch (error) {
+    console.error("Error fetching webmasters:", error);
+    res
+      .status(400)
+      .json({ error: "Unable to get webmasters", details: error.message });
   }
 };
 
-module.exports = { addWebmaster, getWebmastersByUser };
+const updateWebmaster = async (req, res) => {
+  const { id } = req.params;
+  const { campaigns, firstName, lastName, isActive } = req.body;
+  console.log("updating webmaster", req.body.firstName);
+  try {
+    const currentWebmaster = await prismaClient.webmaster.findUnique({
+      where: { id },
+      include: { campaigns: true },
+    });
+
+    if (!currentWebmaster) {
+      return res.status(404).json({ error: "Webmaster not found" });
+    }
+
+    const newCampaignIds = Array.isArray(campaigns) ? campaigns : [];
+
+    const campaignsToConnect = newCampaignIds.filter(
+      (campaignId) =>
+        !currentWebmaster.campaigns.find((c) => c.id === campaignId)
+    );
+
+    const campaignsToDisconnect = currentWebmaster.campaigns
+      .filter((campaign) => !newCampaignIds.includes(campaign.id))
+      .map((campaign) => campaign.id);
+
+    const webmaster = await prismaClient.webmaster.update({
+      where: { id },
+      data: {
+        firstName,
+        lastName,
+        isActive,
+        campaigns: {
+          connect: campaignsToConnect.map((campaignId) => ({ id: campaignId })),
+          disconnect: campaignsToDisconnect.map((campaignId) => ({
+            id: campaignId,
+          })),
+        },
+      },
+      include: {
+        campaigns: true,
+      },
+    });
+
+    console.log("webmaster updated", webmaster);
+    res.status(200).json(webmaster);
+  } catch (error) {
+    console.log("error", error);
+    res
+      .status(400)
+      .json({ error: "Unable to update webmaster", details: error.message });
+  }
+};
+
+module.exports = { addWebmaster, getWebmastersByUser, updateWebmaster };
