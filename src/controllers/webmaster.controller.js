@@ -93,7 +93,6 @@ const getWebmastersByUser = async (req, res) => {
 const updateWebmaster = async (req, res) => {
   const { id } = req.params;
   const { campaigns, firstName, lastName, isActive } = req.body;
-  console.log("updating webmaster", req.body.firstName);
   try {
     const currentWebmaster = await prismaClient.webmaster.findUnique({
       where: { id },
@@ -133,6 +132,16 @@ const updateWebmaster = async (req, res) => {
       },
     });
 
+    // update clerk user
+    // the API key is the clerk user id
+    if (isActive === false) {
+      const clerkUser = await clerkClient.users.lockUser(webmaster.apiKey);
+      console.log("clerkUser", clerkUser);
+    } else {
+      const clerkUser = await clerkClient.users.unlockUser(webmaster.apiKey);
+      console.log("clerkUser", clerkUser);
+    }
+
     console.log("webmaster updated", webmaster);
     res.status(200).json(webmaster);
   } catch (error) {
@@ -143,4 +152,36 @@ const updateWebmaster = async (req, res) => {
   }
 };
 
-module.exports = { addWebmaster, getWebmastersByUser, updateWebmaster };
+const deleteWebmaster = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const currentWebmaster = await prismaClient.webmaster.findUnique({
+      where: { id },
+    });
+
+    if (!currentWebmaster) {
+      res.status(404).json({ error: "Webmaster not found" });
+      return;
+    }
+
+    await prismaClient.webmaster.delete({
+      where: { id },
+    });
+
+    await clerkClient.users.deleteUser(currentWebmaster.apiKey);
+
+    res.status(200).json({ message: "Webmaster deleted" });
+  } catch (error) {
+    console.log("error deleting webmaster", error);
+    res
+      .status(400)
+      .json({ error: "Unable to delete webmaster", details: error.message });
+  }
+};
+
+module.exports = {
+  addWebmaster,
+  getWebmastersByUser,
+  updateWebmaster,
+  deleteWebmaster,
+};
