@@ -7,6 +7,17 @@ const addWebmaster = async (req, res) => {
   console.log("adding new webmaster", req.body);
   const { userId } = req.auth;
   try {
+    const existingUser = await prismaClient.webmaster.findUnique({
+      where: {
+        email,
+      },
+    });
+
+    if (existingUser) {
+      res.status(400).json({ error: "User already exists" });
+      return;
+    }
+
     // Create Clerk user for the webmaster
     const response = await clerkClient.users.createUser({
       username: fullName.split(" ")[0] + Math.floor(Math.random() * 1000),
