@@ -50,8 +50,8 @@ app.use("/api/v1/webmaster", requireAuth(), webmasterRoute);
 app.use("/api/v1/lead", requireAuth(), leadsRoute);
 
 // Organization and role routes
-app.use("/api/v1/organization", requireAuth(), organizationRoute);
-app.use("/api/v1/organization", requireAuth(), roleRoute);
+app.use("/api/v1/org", requireAuth(), organizationRoute);
+app.use("/api/v1/org/role", requireAuth(), roleRoute);
 
 // test route for webhook
 app.post("/webhook", (req, res) => {

@@ -516,12 +516,11 @@ const getMembers = async (req, res) => {
 // Get user's organizations
 const getUserOrganizations = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.auth.userId;
 
     const memberships = await prisma.organizationMember.findMany({
       where: {
         userId,
-        status: "active",
       },
       include: {
         organization: {
