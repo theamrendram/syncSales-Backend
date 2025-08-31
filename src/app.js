@@ -21,6 +21,7 @@ const webmasterRoute = require("./routes/webmaster.route");
 const subscriptionRoute = require("./routes/subscription.route");
 const organizationRoute = require("./routes/organization.route");
 const roleRoute = require("./routes/role.route");
+const chartRoute = require("./routes/chart.route");
 
 app.use(express.json());
 app.use(cors());
@@ -48,11 +49,11 @@ app.use("/api/v1/seller", requireAuth(), sellerRoute);
 app.use("/api/v1/campaign", requireAuth(), campaignRoute);
 app.use("/api/v1/webmaster", requireAuth(), webmasterRoute);
 app.use("/api/v1/lead", requireAuth(), leadsRoute);
+app.use("/api/v1/chart", requireAuth(), chartRoute);
 
 // Organization and role routes
 app.use("/api/v1/org", requireAuth(), organizationRoute);
 app.use("/api/v1/org/role", requireAuth(), roleRoute);
-
 // test route for webhook
 app.post("/webhook", (req, res) => {
   console.log("req.body from lead -> webhook", req.body);

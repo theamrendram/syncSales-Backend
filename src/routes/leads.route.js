@@ -1,4 +1,5 @@
-const {addLead, getLeads, getLeadsByUser, getChartData, getLeadsByUserPagination, getMonthlyLeadsByUser, getPastTenDaysLeadsByUser} = require("../controllers/leads.controller.js");
+const {addLead, getLeads, getLeadsByUser, getLeadsByUserPagination, getMonthlyLeadsByUser, getPastTenDaysLeadsByUser} = require("../controllers/leads.controller.js");
+const { getChartData } = require("../controllers/chart.controller");
 const router = require("express").Router();
 
 router.post("/", addLead);

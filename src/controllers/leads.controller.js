@@ -5,62 +5,11 @@ const getIpAndCountry = require("../utils/get-ip-and-country");
 const {
   chartMetrics,
   generateExtendedReport,
+  transformLeadsToChartData,
+  getLeadsGroupedByDateRouteCampaign,
 } = require("../utils/chart-functions");
 const { addOrganizationFilter } = require("../utils/organization-utils");
 
-const transformLeadsToChartData = (leads) => {
-  // Group leads by date
-  const leadsByDate = leads.reduce((acc, lead) => {
-    const date = new Date(lead.date).toISOString().split("T")[0];
-
-    if (!acc[date]) {
-      acc[date] = {
-        date: lead.date,
-        lead: 0,
-      };
-    }
-
-    // Increment lead count for the date
-    acc[date].lead += 1;
-
-    return acc;
-  }, {});
-
-  // Convert to array and sort by date
-  return Object.values(leadsByDate).sort(
-    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-  );
-};
-
-const getLeadsGroupedByDateRouteCampaign = async (leads) => {
-  const grouped = {};
-
-  leads.forEach((lead) => {
-    const date = lead.date.toISOString().split("T")[0];
-    const routeName = lead.route?.name || "Unknown Route";
-    const campaignName = lead.campaign?.name || "Unknown Campaign";
-
-    const key = `${date}_${routeName}`;
-
-    if (!grouped[key]) {
-      grouped[key] = {
-        date,
-        route: routeName,
-        campaigns: new Set(),
-        count: 0,
-      };
-    }
-
-    grouped[key].campaigns.add(campaignName);
-    grouped[key].count += 1;
-  });
-
-  // Convert campaigns Set to Array
-  return Object.values(grouped).map((item) => ({
-    ...item,
-    campaigns: Array.from(item.campaigns),
-  }));
-};
 
 const getLeads = async (req, res) => {
   try {
@@ -561,87 +510,6 @@ const getLeadsByUserPagination = async (req, res) => {
   }
 };
 
-const getChartData = async (req, res) => {
-  try {
-    const { userId } = req.auth;
-    if (!userId) {
-      return res.status(400).json({ error: "User ID not found" });
-    }
-
-    // Get user info first
-    const user = await prismaClient.user.findUnique({
-      where: { id: userId },
-      select: { role: true, companyId: true, email: true },
-    });
-
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    // Setup the where clause based on user role
-    let where = {};
-
-    if (user.role === "admin") {
-      if (!user.companyId) {
-        return res
-          .status(400)
-          .json({ error: "Company ID not found for admin" });
-      }
-      where = { user: { companyId: user.companyId } };
-    } else if (user.role === "webmaster") {
-      const webmaster = await prismaClient.webmaster.findUnique({
-        where: { email: user.email },
-        select: { campaigns: { select: { id: true } } },
-      });
-
-      if (!webmaster) {
-        return res.status(404).json({ error: "Webmaster not found" });
-      }
-
-      const campaignIds = webmaster.campaigns.map((c) => c.id);
-      if (!campaignIds.length) {
-        return res.json({
-          newChartData: [],
-          totalLeads: 0,
-          metricData: {
-            todaysLeads: 0,
-            yesterdaysLeads: 0,
-            lastMonthLeads: 0,
-            todaysExpectedRevenue: 0,
-          },
-        });
-      }
-
-      where = { campaignId: { in: campaignIds } };
-    } else {
-      return res.status(403).json({ error: "Unauthorized role" });
-    }
-
-    const leads = await prismaClient.lead.findMany({
-      where,
-      include: {
-        campaign: { select: { name: true, campId: true } },
-        route: { select: { payout: true, name: true, routeId: true } },
-      },
-    });
-    const extendedReport = generateExtendedReport(leads);
-    const responseData = {
-      newChartData: await getLeadsGroupedByDateRouteCampaign(leads),
-      totalLeads: leads.length,
-      metricData: chartMetrics(leads),
-      extendedReport,
-    };
-
-    res.json(responseData);
-  } catch (error) {
-    console.error("Error getting chart data:", error);
-    res.status(500).json({
-      error: "Unable to get chart data",
-      details: error.message,
-    });
-  }
-};
-
 const getMonthlyLeadsByUser = async (req, res) => {
   try {
     const { userId } = req.auth;
@@ -854,7 +722,6 @@ module.exports = {
   getLeads,
   addLead,
   getLeadsByUser,
-  getChartData,
   getLeadsByUserPagination,
   getMonthlyLeadsByUser,
   getPastTenDaysLeadsByUser,
