@@ -16,15 +16,15 @@ CREATE TABLE "public"."User" (
     "firstName" TEXT NOT NULL,
     "lastName" TEXT NOT NULL,
     "email" TEXT NOT NULL,
-    "phone" TEXT,
     "password" TEXT,
     "companyName" TEXT,
-    "companyId" TEXT,
     "role" TEXT NOT NULL DEFAULT 'admin',
     "apiKey" TEXT NOT NULL DEFAULT '0',
-    "address" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "address" TEXT,
+    "phone" TEXT,
+    "companyId" TEXT,
 
     CONSTRAINT "User_pkey" PRIMARY KEY ("id")
 );
@@ -33,12 +33,12 @@ CREATE TABLE "public"."User" (
 CREATE TABLE "public"."Organization" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "description" TEXT,
-    "domain" TEXT,
-    "logo" TEXT,
     "ownerId" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "description" TEXT,
+    "domain" TEXT,
+    "logo" TEXT,
 
     CONSTRAINT "Organization_pkey" PRIMARY KEY ("id")
 );
@@ -73,7 +73,6 @@ CREATE TABLE "public"."OrganizationMember" (
 CREATE TABLE "public"."UserPlan" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
-    "organizationId" TEXT,
     "name" TEXT NOT NULL,
     "price" DOUBLE PRECISION NOT NULL,
     "currency" TEXT NOT NULL,
@@ -86,6 +85,7 @@ CREATE TABLE "public"."UserPlan" (
     "endDate" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "organizationId" TEXT,
 
     CONSTRAINT "UserPlan_pkey" PRIMARY KEY ("id")
 );
@@ -100,9 +100,9 @@ CREATE TABLE "public"."Webmaster" (
     "apiKey" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
-    "isActive" BOOLEAN NOT NULL DEFAULT true,
     "userId" TEXT NOT NULL,
     "organizationId" TEXT,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
 
     CONSTRAINT "Webmaster_pkey" PRIMARY KEY ("id")
 );
@@ -110,19 +110,19 @@ CREATE TABLE "public"."Webmaster" (
 -- CreateTable
 CREATE TABLE "public"."Route" (
     "id" TEXT NOT NULL,
-    "routeId" SERIAL NOT NULL,
-    "name" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
     "product" TEXT NOT NULL,
     "payout" DOUBLE PRECISION NOT NULL,
-    "description" TEXT NOT NULL,
-    "hasWebhook" BOOLEAN NOT NULL DEFAULT true,
-    "url" TEXT,
-    "method" TEXT,
+    "name" TEXT NOT NULL,
     "attributes" JSONB,
+    "method" TEXT,
+    "url" TEXT,
+    "routeId" SERIAL NOT NULL,
+    "description" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "hasWebhook" BOOLEAN NOT NULL DEFAULT true,
     "deletedAt" TIMESTAMP(3),
-    "userId" TEXT NOT NULL,
     "organizationId" TEXT,
 
     CONSTRAINT "Route_pkey" PRIMARY KEY ("id")
@@ -133,15 +133,15 @@ CREATE TABLE "public"."Campaign" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
-    "organizationId" TEXT,
-    "campId" TEXT NOT NULL,
-    "manager" TEXT NOT NULL,
     "routeId" TEXT NOT NULL,
-    "webmasterId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-    "lead_period" INTEGER NOT NULL DEFAULT 90,
+    "campId" TEXT NOT NULL,
     "status" "public"."Status" NOT NULL DEFAULT 'active',
+    "manager" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "lead_period" INTEGER NOT NULL DEFAULT 90,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "webmasterId" TEXT,
+    "organizationId" TEXT,
 
     CONSTRAINT "Campaign_pkey" PRIMARY KEY ("id")
 );
@@ -164,21 +164,21 @@ CREATE TABLE "public"."Lead" (
     "email" TEXT,
     "address" TEXT,
     "status" TEXT NOT NULL,
-    "country" TEXT,
-    "ip" TEXT,
     "sub1" TEXT,
     "sub2" TEXT,
     "sub3" TEXT,
     "sub4" TEXT,
-    "userId" TEXT NOT NULL,
-    "organizationId" TEXT,
-    "companyId" TEXT,
-    "date" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "routeId" TEXT NOT NULL,
     "campaignId" TEXT,
-    "webhookResponse" JSONB,
+    "routeId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "date" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "ip" TEXT,
+    "country" TEXT,
+    "webhookResponse" JSONB,
+    "companyId" TEXT,
+    "organizationId" TEXT,
 
     CONSTRAINT "Lead_pkey" PRIMARY KEY ("id")
 );
@@ -187,9 +187,9 @@ CREATE TABLE "public"."Lead" (
 CREATE TABLE "public"."LeadUsage" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
-    "organizationId" TEXT,
     "date" TIMESTAMP(3) NOT NULL,
-    "count" INTEGER NOT NULL DEFAULT 1
+    "count" INTEGER NOT NULL DEFAULT 1,
+    "organizationId" TEXT
 );
 
 -- CreateTable
@@ -201,12 +201,12 @@ CREATE TABLE "public"."Payment" (
     "paymentMethod" TEXT NOT NULL,
     "transactionId" TEXT,
     "userId" TEXT NOT NULL,
-    "organizationId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "description" TEXT,
     "receiptUrl" TEXT,
     "metadata" JSONB,
+    "organizationId" TEXT,
 
     CONSTRAINT "Payment_pkey" PRIMARY KEY ("id")
 );
@@ -214,19 +214,19 @@ CREATE TABLE "public"."Payment" (
 -- CreateTable
 CREATE TABLE "public"."Subscription" (
     "id" TEXT NOT NULL,
-    "razorpaySubscriptionId" TEXT NOT NULL,
     "razorpayPaymentId" TEXT NOT NULL,
-    "customerEmail" TEXT NOT NULL,
     "billingCycle" TEXT NOT NULL,
     "plan" TEXT NOT NULL,
-    "status" "public"."SubscriptionStatus" NOT NULL DEFAULT 'active',
-    "isTrial" BOOLEAN NOT NULL DEFAULT false,
-    "startDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "endDate" TIMESTAMP(3) NOT NULL,
     "userId" TEXT,
-    "organizationId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "endDate" TIMESTAMP(3) NOT NULL,
+    "isTrial" BOOLEAN NOT NULL DEFAULT false,
+    "razorpaySubscriptionId" TEXT NOT NULL,
+    "startDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "status" "public"."SubscriptionStatus" NOT NULL DEFAULT 'active',
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "customerEmail" TEXT NOT NULL,
+    "organizationId" TEXT,
 
     CONSTRAINT "Subscription_pkey" PRIMARY KEY ("id")
 );
@@ -346,34 +346,31 @@ ALTER TABLE "public"."Organization" ADD CONSTRAINT "Organization_ownerId_fkey" F
 ALTER TABLE "public"."Role" ADD CONSTRAINT "Role_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "public"."Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."OrganizationMember" ADD CONSTRAINT "OrganizationMember_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "public"."OrganizationMember" ADD CONSTRAINT "OrganizationMember_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "public"."Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."OrganizationMember" ADD CONSTRAINT "OrganizationMember_roleId_fkey" FOREIGN KEY ("roleId") REFERENCES "public"."Role"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."UserPlan" ADD CONSTRAINT "UserPlan_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "public"."OrganizationMember" ADD CONSTRAINT "OrganizationMember_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."UserPlan" ADD CONSTRAINT "UserPlan_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "public"."Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."Webmaster" ADD CONSTRAINT "Webmaster_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "public"."UserPlan" ADD CONSTRAINT "UserPlan_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."Webmaster" ADD CONSTRAINT "Webmaster_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "public"."Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."Route" ADD CONSTRAINT "Route_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "public"."Webmaster" ADD CONSTRAINT "Webmaster_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."Route" ADD CONSTRAINT "Route_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "public"."Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."Campaign" ADD CONSTRAINT "Campaign_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "public"."Route" ADD CONSTRAINT "Route_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."Campaign" ADD CONSTRAINT "Campaign_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "public"."Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -382,10 +379,13 @@ ALTER TABLE "public"."Campaign" ADD CONSTRAINT "Campaign_organizationId_fkey" FO
 ALTER TABLE "public"."Campaign" ADD CONSTRAINT "Campaign_routeId_fkey" FOREIGN KEY ("routeId") REFERENCES "public"."Route"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "public"."Campaign" ADD CONSTRAINT "Campaign_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "public"."Campaign" ADD CONSTRAINT "Campaign_webmasterId_fkey" FOREIGN KEY ("webmasterId") REFERENCES "public"."Webmaster"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."Lead" ADD CONSTRAINT "Lead_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "public"."Lead" ADD CONSTRAINT "Lead_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "public"."Campaign"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."Lead" ADD CONSTRAINT "Lead_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "public"."Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -394,17 +394,17 @@ ALTER TABLE "public"."Lead" ADD CONSTRAINT "Lead_organizationId_fkey" FOREIGN KE
 ALTER TABLE "public"."Lead" ADD CONSTRAINT "Lead_routeId_fkey" FOREIGN KEY ("routeId") REFERENCES "public"."Route"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."Lead" ADD CONSTRAINT "Lead_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "public"."Campaign"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "public"."Payment" ADD CONSTRAINT "Payment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "public"."Lead" ADD CONSTRAINT "Lead_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."Payment" ADD CONSTRAINT "Payment_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "public"."Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."Subscription" ADD CONSTRAINT "Subscription_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "public"."Payment" ADD CONSTRAINT "Payment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."Subscription" ADD CONSTRAINT "Subscription_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "public"."Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."Subscription" ADD CONSTRAINT "Subscription_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 

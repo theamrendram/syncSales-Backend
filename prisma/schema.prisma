@@ -8,71 +8,63 @@ datasource db {
 }
 
 model User {
-  id          String   @id @default(uuid())
-  firstName   String
-  lastName    String
-  email       String   @unique
-  phone       String?
-  password    String?
-  companyName String?
-  companyId   String?  @default(uuid())
-  role        String   @default("admin")
-  apiKey      String   @unique @default("0")
-  address     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // Organization relationships
+  id                      String               @id @default(uuid())
+  firstName               String
+  lastName                String
+  email                   String               @unique
+  password                String?
+  companyName             String?
+  role                    String               @default("admin")
+  apiKey                  String               @unique @default("0")
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+  address                 String?
+  phone                   String?
+  companyId               String?              @default(uuid())
+  campaigns               Campaign[]
+  leads                   Lead[]
   ownedOrganizations      Organization[]       @relation("OrganizationOwner")
   organizationMemberships OrganizationMember[]
-
-  // Existing relationships
-  leads        Lead[]
-  routes       Route[]
-  payments     Payment[]
-  campaigns    Campaign[]
-  webmaster    Webmaster[]
-  subscription Subscription[]
-  userPlan     UserPlan?      @relation("UserToUserPlan")
+  payments                Payment[]
+  routes                  Route[]
+  subscription            Subscription[]
+  userPlan                UserPlan?            @relation("UserToUserPlan")
+  webmaster               Webmaster[]
 }
 
 model Organization {
-  id          String   @id @default(uuid())
-  name        String
-  description String?
-  domain      String? // Optional domain for organization
-  logo        String? // URL to organization logo
-  ownerId     String
-  owner       User     @relation("OrganizationOwner", fields: [ownerId], references: [id])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // Organization relationships
-  members       OrganizationMember[]
-  routes        Route[]
+  id            String               @id @default(uuid())
+  name          String
+  ownerId       String
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  description   String?
+  domain        String?
+  logo          String?
   campaigns     Campaign[]
   leads         Lead[]
+  owner         User                 @relation("OrganizationOwner", fields: [ownerId], references: [id])
+  members       OrganizationMember[]
   payments      Payment[]
-  webmasters    Webmaster[]
+  Role          Role[]
+  routes        Route[]
   subscriptions Subscription[]
   userPlans     UserPlan[]
-  Role          Role[]
+  webmasters    Webmaster[]
 
   @@index([ownerId])
 }
 
 model Role {
-  id             String       @id @default(uuid())
-  name           String // e.g., "admin", "manager", "viewer"
+  id             String               @id @default(uuid())
+  name           String
   description    String?
-  permissions    Json // JSON object with permission flags
+  permissions    Json
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-
-  // Role relationships
-  members OrganizationMember[]
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  members        OrganizationMember[]
+  organization   Organization         @relation(fields: [organizationId], references: [id])
 
   @@unique([name, organizationId])
   @@index([organizationId])
@@ -86,11 +78,9 @@ model OrganizationMember {
   status         MemberStatus @default(active)
   joinedAt       DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
-
-  // Relationships
-  user         User         @relation(fields: [userId], references: [id])
-  organization Organization @relation(fields: [organizationId], references: [id])
-  role         Role         @relation(fields: [roleId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  role           Role         @relation(fields: [roleId], references: [id])
+  user           User         @relation(fields: [userId], references: [id])
 
   @@unique([userId, organizationId])
   @@index([userId])
@@ -99,24 +89,23 @@ model OrganizationMember {
 }
 
 model UserPlan {
-  id              String    @id @default(uuid())
-  userId          String    @unique
-  organizationId  String? // Make it organization-aware
-  name            String // Optional: Name like "Pro", "Basic", etc.
+  id              String        @id @default(uuid())
+  userId          String        @unique
+  name            String
   price           Float
   currency        String
-  billingCycle    String // e.g., "monthly", "yearly"
+  billingCycle    String
   maxWebmasters   Int
   dailyLeadsLimit Int
   features        Json?
-  isTrial         Boolean   @default(false)
-  startDate       DateTime  @default(now())
+  isTrial         Boolean       @default(false)
+  startDate       DateTime      @default(now())
   endDate         DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  user         User          @relation("UserToUserPlan", fields: [userId], references: [id])
-  organization Organization? @relation(fields: [organizationId], references: [id])
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  organizationId  String?
+  organization    Organization? @relation(fields: [organizationId], references: [id])
+  user            User          @relation("UserToUserPlan", fields: [userId], references: [id])
 
   @@index([organizationId])
 }
@@ -130,36 +119,36 @@ model Webmaster {
   apiKey         String        @unique
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
-  isActive       Boolean      @default(true)
   userId         String
-  organizationId String? // Make it organization-aware
-  user           User          @relation(fields: [userId], references: [id])
-  organization   Organization? @relation(fields: [organizationId], references: [id])
+  organizationId String?
+  isActive       Boolean       @default(true)
   campaigns      Campaign[]
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  user           User          @relation(fields: [userId], references: [id])
 
   @@index([organizationId])
 }
 
 model Route {
   id             String        @id @default(uuid())
-  routeId        Int           @default(autoincrement())
-  name           String
+  userId         String
   product        String
   payout         Float
-  description    String
-  hasWebhook     Boolean       @default(true)
-  url            String?
-  method         String?
+  name           String
   attributes     Json?
+  method         String?
+  url            String?
+  routeId        Int           @default(autoincrement())
+  description    String
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
+  hasWebhook     Boolean       @default(true)
   deletedAt      DateTime?
-  userId         String
-  organizationId String? // Make it organization-aware
-  user           User          @relation(fields: [userId], references: [id])
-  organization   Organization? @relation(fields: [organizationId], references: [id])
-  Lead           Lead[]
+  organizationId String?
   campaigns      Campaign[]
+  Lead           Lead[]
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  user           User          @relation(fields: [userId], references: [id])
 
   @@index([organizationId])
 }
@@ -168,20 +157,20 @@ model Campaign {
   id             String        @id @default(uuid())
   name           String
   userId         String
-  organizationId String? // Make it organization-aware
-  campId         String
-  manager        String
   routeId        String
-  webmasterId    String?
+  campId         String
+  status         Status        @default(active)
+  manager        String
   createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
   lead_period    Int           @default(90)
-  user           User          @relation(fields: [userId], references: [id])
+  updatedAt      DateTime      @updatedAt
+  webmasterId    String?
+  organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id])
   route          Route         @relation(fields: [routeId], references: [id])
-  status         Status        @default(active)
-  Lead           Lead[]
+  user           User          @relation(fields: [userId], references: [id])
   webmaster      Webmaster?    @relation(fields: [webmasterId], references: [id])
+  Lead           Lead[]
 
   @@index([campId])
   @@index([status])
@@ -204,25 +193,25 @@ model Lead {
   email           String?
   address         String?
   status          String
-  country         String?
-  ip              String?
   sub1            String?
   sub2            String?
   sub3            String?
   sub4            String?
-  userId          String
-  organizationId  String? // Make it organization-aware
-  companyId       String?
-  date            DateTime      @default(now())
-  user            User          @relation(fields: [userId], references: [id])
-  organization    Organization? @relation(fields: [organizationId], references: [id])
-  routeId         String
-  route           Route         @relation(fields: [routeId], references: [id])
   campaignId      String?
-  webhookResponse Json?
-  campaign        Campaign?     @relation(fields: [campaignId], references: [id])
+  routeId         String
+  userId          String
+  date            DateTime      @default(now())
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+  ip              String?
+  country         String?
+  webhookResponse Json?
+  companyId       String?
+  organizationId  String?
+  campaign        Campaign?     @relation(fields: [campaignId], references: [id])
+  organization    Organization? @relation(fields: [organizationId], references: [id])
+  route           Route         @relation(fields: [routeId], references: [id])
+  user            User          @relation(fields: [userId], references: [id])
 
   @@index([status])
   @@index([date])
@@ -237,9 +226,9 @@ model Lead {
 model LeadUsage {
   id             String   @default(uuid())
   userId         String
-  organizationId String? // Make it organization-aware
   date           DateTime
   count          Int      @default(1)
+  organizationId String?
 
   @@unique([userId, date])
   @@index([organizationId])
@@ -248,40 +237,40 @@ model LeadUsage {
 model Payment {
   id             String        @id @default(uuid())
   amount         Float
-  currency       String // e.g., 'USD', 'EUR'
-  status         String // e.g., 'pending', 'completed', 'failed', 'refunded'
-  paymentMethod  String // e.g., 'credit_card', 'paypal', 'bank_transfer'
-  transactionId  String? // Unique identifier for the transaction from the payment processor
+  currency       String
+  status         String
+  paymentMethod  String
+  transactionId  String?
   userId         String
-  organizationId String? // Make it organization-aware
-  user           User          @relation(fields: [userId], references: [id])
-  organization   Organization? @relation(fields: [organizationId], references: [id])
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
-  description    String? // Optional description of the payment
-  receiptUrl     String? // Optional URL to the payment receipt
-  metadata       Json? // Optional JSON field for additional payment metadata
+  description    String?
+  receiptUrl     String?
+  metadata       Json?
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  user           User          @relation(fields: [userId], references: [id])
 
   @@index([organizationId])
 }
 
 model Subscription {
   id                     String             @id @default(uuid())
-  razorpaySubscriptionId String             @unique
   razorpayPaymentId      String
-  customerEmail          String
   billingCycle           String
   plan                   String
-  status                 SubscriptionStatus @default(active)
-  isTrial                Boolean            @default(false)
-  startDate              DateTime           @default(now())
-  endDate                DateTime
   userId                 String?
-  organizationId         String? // Make it organization-aware
-  user                   User?              @relation(fields: [userId], references: [id])
-  organization           Organization?      @relation(fields: [organizationId], references: [id])
   createdAt              DateTime           @default(now())
+  endDate                DateTime
+  isTrial                Boolean            @default(false)
+  razorpaySubscriptionId String             @unique
+  startDate              DateTime           @default(now())
+  status                 SubscriptionStatus @default(active)
   updatedAt              DateTime           @updatedAt
+  customerEmail          String
+  organizationId         String?
+  organization           Organization?      @relation(fields: [organizationId], references: [id])
+  user                   User?              @relation(fields: [userId], references: [id])
 
   @@index([razorpaySubscriptionId])
   @@index([status])
