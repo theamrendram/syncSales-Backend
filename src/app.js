@@ -28,7 +28,7 @@ app.use(cors());
 app.use(express.urlencoded({ extended: true }));
 
 // leads api
-app.use("/api/v1/leads", LeadsLimiter, checkUserPlan, leadsApiRoute);
+app.use("/api/v1/leads", checkUserPlan, leadsApiRoute);
 app.use("/api/v1/payment", paymentRoute);
 app.use("/api/v1/postback", postbackRoute);
 app.use("/api/v1/subscription", subscriptionRoute);
