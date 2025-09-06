@@ -24,6 +24,7 @@ const getCampaignsByUser = async (req, res) => {
     const campaigns = await prismaClient.campaign.findMany({
       where: {
         userId,
+        isArchived: false,
       },
       include: {
         user: true, // Include related User data
@@ -45,6 +46,7 @@ const getCampaignById = async (req, res) => {
     const campaign = await prismaClient.campaign.findUnique({
       where: {
         id,
+        isArchived: false,
       },
       include: {
         user: false, // Include related User data
@@ -74,7 +76,7 @@ const addCampaign = async (req, res) => {
         userId,
         routeId,
         manager,
-        lead_period : Number(lead_period),
+        lead_period: Number(lead_period),
       },
     });
     console.log(campaign);
@@ -113,17 +115,29 @@ const editCampaign = async (req, res) => {
 
 const deleteCampaign = async (req, res) => {
   const { id } = req.params;
+
+  console.log("id at delete campaign", id);
   try {
-    const campaign = await prismaClient.campaign.delete({
+    const campaign = await prismaClient.campaign.update({
       where: {
         id,
       },
+      data: {
+        isArchived: true,
+        updatedAt: new Date(),
+      },
     });
-    res.json(campaign);
+    console.log("campaign at delete campaign", campaign);
+    res.json({
+      success: true,
+      message: "Campaign archived successfully",
+      data: campaign.id,
+    });
   } catch (error) {
+    console.log("error at delete campaign", error);
     res
       .status(400)
-      .json({ error: "Unable to delete campaign", details: error.message });
+      .json({ error: "Unable to archive campaign", details: error.message, success: false });
   }
 };
 module.exports = {

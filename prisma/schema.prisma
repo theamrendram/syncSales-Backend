@@ -157,10 +157,11 @@ model Campaign {
   id             String        @id @default(uuid())
   name           String
   userId         String
-  routeId        String
+  routeId        String 
   campId         String
   status         Status        @default(active)
   manager        String
+  isArchived     Boolean       @default(false)
   createdAt      DateTime      @default(now())
   lead_period    Int           @default(90)
   updatedAt      DateTime      @updatedAt
