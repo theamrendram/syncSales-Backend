@@ -550,13 +550,14 @@ const getMonthlyLeadsByUser = async (req, res) => {
         },
       };
     } else if (user.role === "webmaster") {
+      console.log("Webmaster found at get monthly leads by user", user.email);
       const webmaster = await prismaClient.webmaster.findUnique({
         where: { email: user.email },
         select: { campaigns: { select: { id: true } } },
       });
 
       if (!webmaster) {
-        console.log("Webmaster not found");
+        console.log("Webmaster not found at get monthly leads by user");
         return res.status(404).json({ error: "Webmaster not found" });
       }
 

@@ -3,9 +3,10 @@ const { clerkClient } = require("@clerk/express");
 const prismaClient = new PrismaClient();
 
 const addWebmaster = async (req, res) => {
-  const { email, password, fullName, campaigns } = await req.body;
+  const { email: emailAddress, password, fullName, campaigns } = await req.body;
   console.log("adding new webmaster", req.body);
   const { userId } = req.auth;
+  const email = emailAddress.toLowerCase();
   try {
     const existingUser = await prismaClient.webmaster.findUnique({
       where: {
