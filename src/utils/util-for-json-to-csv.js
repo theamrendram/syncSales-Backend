@@ -3,8 +3,8 @@ const { Parser } = require("json2csv");
 const fs = require("fs");
 
 async function exportLeadsToCSV() {
-  const startDate = new Date("2025-04-01T00:00:00.000Z");
-  const endDate = new Date("2025-04-24T23:59:59.999Z");
+  const startDate = new Date("2025-06-01T00:00:00.000Z");
+  const endDate = new Date("2025-09-20T23:59:59.999Z");
 
   try {
     // Fetch data from the database
@@ -49,8 +49,8 @@ async function exportLeadsToCSV() {
     const csv = parser.parse(leads);
 
     // Write CSV to file
-    fs.writeFileSync("leads_apr_2025.csv", csv);
-    console.log("CSV file saved as leads_apr_2025.csv");
+    fs.writeFileSync("leads_jun_to_sep_2025.csv", csv);
+    console.log("CSV file saved as leads_jun_to_sep_2025.csv");
   } catch (error) {
     console.error("Error exporting leads:", error);
   } finally {

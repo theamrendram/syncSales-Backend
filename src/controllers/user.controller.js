@@ -97,7 +97,10 @@ const getUserAPI = async (req, res) => {
     console.log(user);
     return res.status(200).json({ data: user });
   } catch (error) {
-    return res.status(500).json({ error: error });
+    console.error("Error in getUserAPI:", error);
+    return res
+      .status(500)
+      .json({ error: error.message || "Internal server error" });
   }
 };
 
@@ -111,7 +114,10 @@ const getUser = async (req, res) => {
     });
     return res.status(200).json({ data: user });
   } catch (error) {
-    return res.status(500).json({ error: error });
+    console.error("Error in getUser:", error);
+    return res
+      .status(500)
+      .json({ error: error.message || "Internal server error" });
   }
 };
 

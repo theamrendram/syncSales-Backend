@@ -3,3 +3,4 @@ node_modules
 .env
 tests/
 prisma/scripts.js
+leads_jun_to_sep_2025.csv
