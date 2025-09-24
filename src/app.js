@@ -28,7 +28,7 @@ app.use(cors());
 app.use(express.urlencoded({ extended: true }));
 
 // leads api
-app.use("/api/v1/leads", leadsApiRoute);
+app.use("/api/v1/leads", checkUserPlan, leadsApiRoute);
 app.use("/api/v1/payment", paymentRoute);
 app.use("/api/v1/postback", postbackRoute);
 app.use("/api/v1/subscription", subscriptionRoute);
@@ -54,6 +54,7 @@ app.use("/api/v1/chart", requireAuth(), chartRoute);
 // Organization and role routes
 app.use("/api/v1/org", requireAuth(), organizationRoute);
 app.use("/api/v1/org/role", requireAuth(), roleRoute);
+
 // test route for webhook
 app.post("/webhook", (req, res) => {
   console.log("req.body from lead -> webhook", req.body);

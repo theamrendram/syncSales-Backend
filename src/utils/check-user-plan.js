@@ -1,21 +1,15 @@
 const prismaClient = require("./prismaClient");
-const rateLimiter = require("express-rate-limit");
 
-let limit = 0;
 const checkUserPlan = async (req, res, next) => {
   try {
     const { apiKey } = req.body;
-    console.log("Api Key:", apiKey);
+
     if (!apiKey) {
       return res.status(400).json({ error: "API key is required" });
     }
     const user = await prismaClient.user.findUnique({
-      where: {
-        apiKey: apiKey,
-      },
-      include: {
-        userPlan: true,
-      },
+      where: { apiKey },
+      include: { userPlan: true },
     });
 
     if (!user) {
@@ -25,13 +19,15 @@ const checkUserPlan = async (req, res, next) => {
     if (!user.userPlan) {
       return res.status(403).json({ error: "User plan not found" });
     }
+
     const { dailyLeadsLimit } = user.userPlan;
-    console.log("User Plan Daily Limit:", dailyLeadsLimit);
-    limit = dailyLeadsLimit;
+
+
 
     const today = new Date();
-    today.setUTCHours(0, 0, 0, 0); // normalized to utc midnight
-    // get or create
+    today.setUTCHours(0, 0, 0, 0);
+
+    // Ensure usage row exists
     const usage = await prismaClient.leadUsage.upsert({
       where: {
         userId_date: {
@@ -39,17 +35,22 @@ const checkUserPlan = async (req, res, next) => {
           date: today,
         },
       },
-      update: {}, // no need to update yet
+      update: {},
       create: {
         userId: user.id,
         date: today,
+        count: 0,
+        organizationId: user.organizationId,
       },
     });
+    console.log("dailyLeadsLimit", dailyLeadsLimit);
+    if (dailyLeadsLimit === 0) {
+      next();
+      return;
+    }
 
-    if (usage >= dailyLeadsLimit) {
-      return req.status(429).json({
-        error: "Daily lead limit reached",
-      });
+    if (usage.count >= dailyLeadsLimit) {
+      return res.status(429).json({ error: "Daily lead limit reached" });
     }
 
     next();
@@ -59,6 +60,4 @@ const checkUserPlan = async (req, res, next) => {
   }
 };
 
-module.exports = {
-  checkUserPlan,
-};
+module.exports = { checkUserPlan };
