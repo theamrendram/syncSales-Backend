@@ -20,10 +20,10 @@ model User {
   updatedAt               DateTime             @updatedAt
   address                 String?
   phone                   String?
-  companyId               String?              @default(uuid())
+  organizationId          String?              @unique
   campaigns               Campaign[]
   leads                   Lead[]
-  ownedOrganizations      Organization[]       @relation("OrganizationOwner")
+  ownedOrganization       Organization?        @relation("Owner")
   organizationMemberships OrganizationMember[]
   payments                Payment[]
   routes                  Route[]
@@ -35,7 +35,7 @@ model User {
 model Organization {
   id            String               @id @default(uuid())
   name          String
-  ownerId       String
+  ownerId       String               @unique
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
   description   String?
@@ -43,7 +43,7 @@ model Organization {
   logo          String?
   campaigns     Campaign[]
   leads         Lead[]
-  owner         User                 @relation("OrganizationOwner", fields: [ownerId], references: [id])
+  owner         User                 @relation("Owner", fields: [ownerId], references: [id])
   members       OrganizationMember[]
   payments      Payment[]
   Role          Role[]
@@ -157,7 +157,7 @@ model Campaign {
   id             String        @id @default(uuid())
   name           String
   userId         String
-  routeId        String 
+  routeId        String
   campId         String
   status         Status        @default(active)
   manager        String
@@ -178,12 +178,6 @@ model Campaign {
   @@index([userId])
   @@index([routeId])
   @@index([organizationId])
-}
-
-model Seller {
-  id     String @id @default(uuid())
-  name   String
-  apiKey String @unique
 }
 
 model Lead {

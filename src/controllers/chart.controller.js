@@ -14,7 +14,7 @@ const getChartData = async (req, res) => {
 
     const user = await prismaClient.user.findUnique({
       where: { id: userId },
-      select: { role: true, companyId: true, email: true },
+      select: { role: true, organizationId: true, email: true },
     });
 
     if (!user) {
@@ -25,12 +25,12 @@ const getChartData = async (req, res) => {
     let where = {};
 
     if (user.role === "admin") {
-      if (!user.companyId) {
+      if (!user.organizationId) {
         return res
           .status(400)
-          .json({ error: "Company ID not found for admin" });
+          .json({ error: "Organization ID not found for admin" });
       }
-      where = { user: { companyId: user.companyId } };
+      where = { user: { organizationId: user.organizationId } };
     } else if (user.role === "webmaster") {
       const webmaster = await prismaClient.webmaster.findUnique({
         where: { email: user.email },
@@ -95,7 +95,7 @@ const getMetricData = async (req, res) => {
 
     const user = await prismaClient.user.findUnique({
       where: { id: userId },
-      select: { role: true, companyId: true, email: true },
+      select: { role: true, organizationId: true, email: true },
     });
 
     if (!user) {
@@ -106,12 +106,12 @@ const getMetricData = async (req, res) => {
     let where = {};
 
     if (user.role === "admin") {
-      if (!user.companyId) {
+      if (!user.organizationId) {
         return res
           .status(400)
-          .json({ error: "Company ID not found for admin" });
+          .json({ error: "Organization ID not found for admin" });
       }
-      where = { user: { companyId: user.companyId } };
+      where = { user: { organizationId: user.organizationId } };
     } else if (user.role === "webmaster") {
       const webmaster = await prismaClient.webmaster.findUnique({
         where: { email: user.email },

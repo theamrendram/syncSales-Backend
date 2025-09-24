@@ -28,7 +28,7 @@ app.use(cors());
 app.use(express.urlencoded({ extended: true }));
 
 // leads api
-app.use("/api/v1/leads", checkUserPlan, leadsApiRoute);
+app.use("/api/v1/leads", leadsApiRoute);
 app.use("/api/v1/payment", paymentRoute);
 app.use("/api/v1/postback", postbackRoute);
 app.use("/api/v1/subscription", subscriptionRoute);
@@ -42,7 +42,7 @@ app.get("/unauthenticated", (req, res) => {
 });
 
 app.use(clerkMiddleware());
-app.use("/api/v1/user", userRoute);
+app.use("/api/v1/user", requireAuth(), userRoute);
 app.use("/api/v1/route", requireAuth(), routeRoute);
 app.use("/api/v1/webhook", requireAuth(), webhookRoute);
 app.use("/api/v1/seller", requireAuth(), sellerRoute);

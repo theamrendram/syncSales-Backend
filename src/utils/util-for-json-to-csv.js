@@ -30,7 +30,7 @@ async function exportLeadsToCSV() {
         sub3: true,
         sub4: true,
         userId: true,
-        companyId: true,
+        organizationId: true,
         date: true,
         routeId: true,
         campaignId: true,
