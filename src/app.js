@@ -22,6 +22,10 @@ const subscriptionRoute = require("./routes/subscription.route");
 const organizationRoute = require("./routes/organization.route");
 const roleRoute = require("./routes/role.route");
 const chartRoute = require("./routes/chart.route");
+const clerkWebhookRoute = require("./routes/clerk-webhook.route");
+
+// clerk webhook route -> do not protect this route or move it to the end of the middleware chain
+app.use("/api/v1/clerk-webhook", clerkWebhookRoute);
 
 app.use(express.json());
 app.use(cors());
@@ -50,7 +54,6 @@ app.use("/api/v1/campaign", requireAuth(), campaignRoute);
 app.use("/api/v1/webmaster", requireAuth(), webmasterRoute);
 app.use("/api/v1/lead", requireAuth(), leadsRoute);
 app.use("/api/v1/chart", requireAuth(), chartRoute);
-
 // Organization and role routes
 app.use("/api/v1/org", requireAuth(), organizationRoute);
 app.use("/api/v1/org/role", requireAuth(), roleRoute);
