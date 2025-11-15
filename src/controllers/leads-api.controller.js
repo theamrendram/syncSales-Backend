@@ -7,31 +7,63 @@ const getIpAndCountry = require("../utils/get-ip-and-country");
 const createLead = async (leadData, userId) => {
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
-  const [leadResult, usageResult] = await Promise.allSettled([
-    prismaClient.lead.create({ data: leadData }),
-    prismaClient.leadUsage.update({
+
+  // Use transaction for atomicity and upsert for leadUsage to prevent failures
+  return await prismaClient.$transaction(async (tx) => {
+    const lead = await tx.lead.create({ data: leadData });
+
+    // Upsert ensures the record exists, preventing update failures
+    await tx.leadUsage.upsert({
       where: {
         userId_date: {
           userId: userId,
           date: today,
         },
       },
-      data: {
+      update: {
         count: {
           increment: 1,
         },
       },
-    }),
-  ]);
+      create: {
+        userId: userId,
+        date: today,
+        count: 1,
+      },
+    });
 
-  if (leadResult.status === "fulfilled") {
-    return leadResult.value;
-  } else {
-    console.error("Lead creation failed:", leadResult.reason);
-    throw new Error("Lead creation failed");
-  }
+    return lead;
+  });
 };
 
+// Extract webhook handling to reduce duplication
+const handleWebhookAsync = async (route, lead) => {
+  if (!route?.hasWebhook) return;
+
+  try {
+    const webhookRes = await sendWebhook(route, lead);
+    await prismaClient.lead.update({
+      where: { id: lead.id },
+      data: { webhookResponse: webhookRes },
+    });
+  } catch (error) {
+    console.error("Error sending webhook:", error.message);
+    // Store error in webhookResponse for debugging
+    await prismaClient.lead
+      .update({
+        where: { id: lead.id },
+        data: {
+          webhookResponse: {
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      })
+      .catch((updateError) => {
+        console.error("Failed to update lead with webhook error:", updateError);
+      });
+  }
+};
 
 const handleDuplicateLead = async (leadData, userWithCampaign, res) => {
   const duplicateLead = await createLead(
@@ -39,23 +71,12 @@ const handleDuplicateLead = async (leadData, userWithCampaign, res) => {
     userWithCampaign.id
   );
 
-  if (userWithCampaign.campaigns[0].route.hasWebhook) {
-    const webhookRes = await sendWebhook(
-      userWithCampaign.campaigns[0].route,
-      duplicateLead
-    );
-
-    if (webhookRes.error) {
-      console.log("Error sending webhook:", webhookRes.error);
-    }
-
-    const updateLead = await prismaClient.lead.update({
-      where: {
-        id: duplicateLead.id,
-      },
-      data: {
-        webhookResponse: webhookRes,
-      },
+  // Send response immediately, handle webhook asynchronously
+  const route = userWithCampaign.campaigns[0]?.route;
+  if (route?.hasWebhook) {
+    // Fire and forget - don't block response
+    handleWebhookAsync(route, duplicateLead).catch((err) => {
+      console.error("Async webhook handling failed:", err);
     });
   }
 
@@ -66,28 +87,13 @@ const handleDuplicateLead = async (leadData, userWithCampaign, res) => {
 
 const handleNewLead = async (leadData, userWithCampaign, res) => {
   const lead = await createLead(leadData, userWithCampaign.id);
-  if (!lead) {
-    return res.status(400).json({ error: "Unable to create lead" });
-  }
 
-  if (userWithCampaign.campaigns[0].route.hasWebhook) {
-    const webhookRes = await sendWebhook(
-      userWithCampaign.campaigns[0].route,
-      lead
-    );
-
-    console.log("webhook response", webhookRes);
-    if (webhookRes.error) {
-      console.log("Error sending webhook:", webhookRes.error);
-    }
-
-    const updateLead = await prismaClient.lead.update({
-      where: {
-        id: lead.id,
-      },
-      data: {
-        webhookResponse: webhookRes,
-      },
+  // Send response immediately, handle webhook asynchronously
+  const route = userWithCampaign.campaigns[0]?.route;
+  if (route?.hasWebhook) {
+    // Fire and forget - don't block response
+    handleWebhookAsync(route, lead).catch((err) => {
+      console.error("Async webhook handling failed:", err);
     });
   }
 
@@ -122,7 +128,9 @@ const getUserWithCampaign = async (apiKey, campId) => {
 };
 // ----- END utility functions ------
 
-const addLead = async (req, res) => {
+// Extract common lead processing logic
+const processLeadRequest = async (req, res, source) => {
+  const data = source === "body" ? req.body : req.query;
   const {
     name,
     phone,
@@ -134,8 +142,9 @@ const addLead = async (req, res) => {
     sub4,
     campId,
     apiKey,
-  } = req.body;
+  } = data;
 
+  // Validation
   if (!apiKey) {
     return res.status(400).json({ error: "Missing API key" });
   }
@@ -143,9 +152,16 @@ const addLead = async (req, res) => {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
+  // Sanitize and parse input
   const { ip, country } = getIpAndCountry(req);
-  const [firstName, lastName] = name.split(" ");
+  const nameParts = (name || "").trim().split(/\s+/);
+  const firstName = nameParts[0] || "";
+  const lastName = nameParts.slice(1).join(" ") || null;
   const sanitizedPhone = String(phone).replace(/\D/g, "");
+
+  if (!sanitizedPhone) {
+    return res.status(400).json({ error: "Invalid phone number" });
+  }
 
   try {
     const userWithCampaign = await getUserWithCampaign(apiKey, campId);
@@ -160,18 +176,18 @@ const addLead = async (req, res) => {
 
     const isDuplicate = await checkDuplicateLead(sanitizedPhone, campaign);
     const leadData = {
-      firstName,
-      lastName,
+      firstName: firstName.trim(),
+      lastName: lastName?.trim() || null,
       phone: sanitizedPhone,
-      email,
-      address,
+      email: email?.trim() || null,
+      address: address || null,
       ip,
       country,
       status: "Pending",
-      sub1,
-      sub2,
-      sub3,
-      sub4,
+      sub1: sub1 || null,
+      sub2: sub2 || null,
+      sub3: sub3 || null,
+      sub4: sub4 || null,
       campaignId: campaign.id,
       routeId: campaign.routeId,
       userId: userWithCampaign.id,
@@ -183,7 +199,7 @@ const addLead = async (req, res) => {
 
     return await handleNewLead(leadData, userWithCampaign, res);
   } catch (error) {
-    console.log(error);
+    console.error("Error processing lead:", error);
     return res.status(400).json({
       success: false,
       error: "Unable to create lead",
@@ -192,69 +208,12 @@ const addLead = async (req, res) => {
   }
 };
 
+const addLead = async (req, res) => {
+  return processLeadRequest(req, res, "body");
+};
+
 const addLeadGet = async (req, res) => {
-  const {
-    name,
-    phone,
-    email,
-    address,
-    sub1,
-    sub2,
-    sub3,
-    sub4,
-    campId,
-    apiKey,
-  } = req.query;
-
-  if (!name || !phone || !apiKey || !campId) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
-
-  const { ip, country } = getIpAndCountry(req);
-  const [firstName, lastName] = name.split(" ");
-  const sanitizedPhone = String(phone).replace(/\D/g, "");
-
-  try {
-    const userWithCampaign = await getUserWithCampaign(apiKey, campId);
-    if (!userWithCampaign) {
-      return res.status(400).json({ error: "Invalid API key" });
-    }
-
-    const campaign = userWithCampaign.campaigns[0];
-    if (!campaign) {
-      return res.status(400).json({ error: "Invalid campaign ID" });
-    }
-
-    const isDuplicate = await checkDuplicateLead(sanitizedPhone, campaign);
-    const leadData = {
-      firstName,
-      lastName,
-      phone: sanitizedPhone,
-      email,
-      address,
-      ip,
-      country,
-      status: "Pending",
-      sub1,
-      sub2,
-      sub3,
-      sub4,
-      campaignId: campaign.id,
-      routeId: campaign.routeId,
-      userId: userWithCampaign.id,
-    };
-
-    if (isDuplicate) {
-      return await handleDuplicateLead(leadData, userWithCampaign, res);
-    }
-
-    return await handleNewLead(leadData, userWithCampaign, res);
-  } catch (error) {
-    console.log(error);
-    return res
-      .status(400)
-      .json({ error: "Unable to create lead", details: error.message });
-  }
+  return processLeadRequest(req, res, "query");
 };
 
 const updateLead = async (req, res) => {
