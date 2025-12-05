@@ -14,6 +14,6 @@ route.post("/", addUser);
 route.get("/", getUser);
 route.post("/api-key", addUserAPI);
 route.get("/api-key", getUserAPI);
-route.get("/all", getAllUsers);
+// route.get("/all", getAllUsers);
 
 module.exports = route;

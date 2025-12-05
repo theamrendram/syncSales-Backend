@@ -4,11 +4,13 @@ const prisma = new PrismaClient();
 // Create a new organization
 const createOrganization = async (req, res) => {
   try {
-    const { name, description, domain, logo } = req.body;
-    const userId = req.user.id;
+    const { organizationName, description, domain } = req.body;
+    console.log("req.body", req.body);
+    const logo = req.file?.path;
+    const userId = req.auth.userId;
 
     // Check if user already owns an organization
-    const existingOrg = await prisma.organization.findFirst({
+    const existingOrg = await prisma.organization.findUnique({
       where: { ownerId: userId },
     });
 
@@ -22,7 +24,7 @@ const createOrganization = async (req, res) => {
     // Create organization
     const organization = await prisma.organization.create({
       data: {
-        name,
+        name: organizationName,
         description,
         domain,
         logo,
@@ -140,7 +142,7 @@ const createOrganization = async (req, res) => {
 const getOrganization = async (req, res) => {
   try {
     const { organizationId } = req.params;
-    const userId = req.user.id;
+    const userId = req.auth.userId;
 
     // Check if user is member of the organization
     const membership = await prisma.organizationMember.findFirst({
@@ -218,7 +220,7 @@ const updateOrganization = async (req, res) => {
   try {
     const { organizationId } = req.params;
     const { name, description, domain, logo } = req.body;
-    const userId = req.user.id;
+    const userId = req.auth.userId;
 
     // Check if user is owner or has permission to manage organization
     const membership = await prisma.organizationMember.findFirst({
@@ -288,7 +290,7 @@ const addMember = async (req, res) => {
   try {
     const { organizationId } = req.params;
     const { email, roleId } = req.body;
-    const userId = req.user.id;
+    const userId = req.auth.userId;
 
     // Check if user has permission to manage members
     const membership = await prisma.organizationMember.findFirst({
@@ -399,7 +401,7 @@ const addMember = async (req, res) => {
 const removeMember = async (req, res) => {
   try {
     const { organizationId, memberId } = req.params;
-    const userId = req.user.id;
+    const userId = req.auth.userId;
 
     // Check if user has permission to manage members
     const membership = await prisma.organizationMember.findFirst({
@@ -463,7 +465,7 @@ const removeMember = async (req, res) => {
 const getMembers = async (req, res) => {
   try {
     const { organizationId } = req.params;
-    const userId = req.user.id;
+    const userId = req.auth.userId;
 
     // Check if user is member of the organization
     const membership = await prisma.organizationMember.findFirst({

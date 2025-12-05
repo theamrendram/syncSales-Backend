@@ -1,5 +1,6 @@
 const prismaClient = require("../utils/prismaClient");
 const { generateKey } = require("../utils/generate-key");
+const { clerkClient } = require("@clerk/express");
 const addUser = async (req, res) => {
   const {
     firstName,
@@ -8,22 +9,39 @@ const addUser = async (req, res) => {
     password = "",
     companyName,
     role,
-    userId,
   } = req.body;
+
+  console.log("req.body", req.body);
+  if (!firstName || !lastName || !email || !password) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
   try {
     const userExists = await prismaClient.user.findUnique({
       where: {
-        id: userId,
+        email: email,
       },
     });
 
     if (userExists) {
-      return res.status(400).json({ error: "User already exists" });
+      return res
+        .status(400)
+        .json({ error: "User already exists with this email" });
     }
+
+    const clerkUser = await clerkClient.users.createUser({
+      username: email.split("@")[0].replace(/\./g, ""),
+      emailAddress: [email],
+      password,
+      firstName,
+      lastName,
+      deleteSelfEnabled: false,
+    });
+
+    console.log("clerkUser", clerkUser);
 
     const user = await prismaClient.user.create({
       data: {
-        id: userId,
+        id: clerkUser.id,
         firstName,
         lastName,
         email,
@@ -38,9 +56,24 @@ const addUser = async (req, res) => {
     res.status(201).json(user);
   } catch (error) {
     console.log(error);
-    res
-      .status(400)
-      .json({ error: "Unable to create user", details: error.message });
+    // Clerk errors come with `errors` array
+    if (error.errors && Array.isArray(error.errors)) {
+      return res.status(400).json({
+        error: "ClerkError",
+        details: error.errors.map((e) => ({
+          code: e.code,
+          message: e.message,
+          longMessage: e.longMessage,
+          meta: e.meta,
+        })),
+      });
+    }
+
+    // Fallback for other errors
+    res.status(500).json({
+      error: "Unable to create user",
+      details: error.message,
+    });
   }
 };
 

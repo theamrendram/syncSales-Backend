@@ -23,6 +23,7 @@ const organizationRoute = require("./routes/organization.route");
 const roleRoute = require("./routes/role.route");
 const chartRoute = require("./routes/chart.route");
 const clerkWebhookRoute = require("./routes/clerk-webhook.route");
+const { addUser } = require("./controllers/user.controller");
 
 // clerk webhook route -> do not protect this route or move it to the end of the middleware chain
 app.use("/api/v1/clerk-webhook", clerkWebhookRoute);
@@ -45,6 +46,7 @@ app.get("/unauthenticated", (req, res) => {
   res.send("unauthenticated request");
 });
 
+app.use("/api/v1/user/create", addUser);
 app.use(clerkMiddleware());
 app.use("/api/v1/user", requireAuth(), userRoute);
 app.use("/api/v1/route", requireAuth(), routeRoute);

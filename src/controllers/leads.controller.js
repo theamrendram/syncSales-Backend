@@ -592,6 +592,8 @@ const getMonthlyLeadsByUser = async (req, res) => {
         webhookResponse: true,
         createdAt: true,
         updatedAt: true,
+        sub1: true,
+        sub2: true,
         campaign: {
           select: {
             id: true,
