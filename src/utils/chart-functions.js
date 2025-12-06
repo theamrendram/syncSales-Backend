@@ -9,6 +9,7 @@ const predefinedColors = {
   brave: "#FF8C33",
   tor: "#33FF8C",
   maxthon: "#FF333D",
+  time: "#33D1FF",
 };
 
 const assignColor = (() => {
@@ -24,20 +25,33 @@ const assignColor = (() => {
   };
 })();
 
+// Helper to get IST date string (YYYY-MM-DD)
+const getISTDateString = (dateInput) => {
+  const date = dateInput ? new Date(dateInput) : new Date();
+  return date.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+};
 
 const chartMetrics = (leads) => {
   const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-  const twoDaysAgo = new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000);
+  const todayStr = getISTDateString(now);
+  
+  // Calculate yesterday and other relative dates in IST
+  // We construct a date from the string to subtract days safely
+  const todayDate = new Date(todayStr); // Treating YYYY-MM-DD as UTC midnight for math checks is safe if consistent
+  const yesterdayDate = new Date(todayDate);
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterdayStr = yesterdayDate.toISOString().split('T')[0];
+  
+  const twoDaysAgoDate = new Date(todayDate);
+  twoDaysAgoDate.setDate(twoDaysAgoDate.getDate() - 2);
+  const twoDaysAgoStr = twoDaysAgoDate.toISOString().split('T')[0];
 
-  const firstDayOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastDayOfLastMonth = new Date(firstDayOfThisMonth.getTime() - 1);
-  const firstDayOfLastMonth = new Date(
-    lastDayOfLastMonth.getFullYear(),
-    lastDayOfLastMonth.getMonth(),
-    1
-  );
+  const currentMonthYearStr = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata", year: 'numeric', month: '2-digit' }).slice(0, 7); // YYYY-MM
+  
+  // Previous month calculation
+  const firstDayThisMonth = new Date(todayDate.getFullYear(), todayDate.getMonth(), 1);
+  const lastDayLastMonth = new Date(firstDayThisMonth.getTime() - 1);
+  const prevMonthYearStr = lastDayLastMonth.toISOString().slice(0, 7); // YYYY-MM
 
   // Buckets
   let todaysLeads = 0,
@@ -56,9 +70,10 @@ const chartMetrics = (leads) => {
 
   // 🔥 Single-pass loop
   for (const lead of leads) {
-    let leadDate;
+    let leadISTStr;
     try {
-      leadDate = new Date(lead.createdAt);
+      if (!lead.createdAt) continue;
+      leadISTStr = getISTDateString(lead.createdAt);
     } catch {
       continue;
     }
@@ -75,23 +90,25 @@ const chartMetrics = (leads) => {
     }
 
     // Today
-    if (leadDate >= today) {
+    if (leadISTStr === todayStr) {
       todaysLeads++;
       todaysRevenue += payout;
     }
     // Yesterday
-    else if (leadDate >= yesterday && leadDate < today) {
+    else if (leadISTStr === yesterdayStr) {
       yesterdaysLeads++;
       yesterdaysRevenue += payout;
     }
     // Two days ago
-    else if (leadDate >= twoDaysAgo && leadDate < yesterday) {
+    else if (leadISTStr === twoDaysAgoStr) {
       twoDaysAgoLeads++;
       twoDaysAgoRevenue += payout;
     }
 
     // Last month
-    if (leadDate >= firstDayOfLastMonth && leadDate <= lastDayOfLastMonth) {
+    // Check if lead's month matches last month
+    const leadMonthStr = leadISTStr.slice(0, 7);
+    if (leadMonthStr === prevMonthYearStr) {
       lastMonthLeads++;
       lastMonthRevenue += payout;
     }
@@ -104,8 +121,8 @@ const chartMetrics = (leads) => {
     campaignStats[campaignName].leads++;
     campaignStats[campaignName].revenue += payout;
 
-    // Pie chart (this month only)
-    if (leadDate >= firstDayOfThisMonth && leadDate <= now) {
+    // Pie chart (this month only - IST)
+    if (leadMonthStr === currentMonthYearStr) {
       const pieCampaign = campaignName || "other";
       if (!pieChartMap[pieCampaign]) {
         pieChartMap[pieCampaign] = {
@@ -164,11 +181,13 @@ const chartMetrics = (leads) => {
     pieChartData,
   };
 };
+
 const generateExtendedReport = (leads) => {
   const reportMap = new Map();
 
   leads.forEach((lead) => {
-    const date = new Date(lead.date).toISOString().split("T")[0];
+    // Use IST date
+    const date = getISTDateString(lead.date || lead.createdAt);
 
     // ✅ Safe access using optional chaining and fallback values
     const route = lead.route?.name || "Unknown Route";
@@ -209,13 +228,13 @@ const generateExtendedReport = (leads) => {
 };
 
 const transformLeadsToChartData = (leads) => {
-  // Group leads by date
+  // Group leads by date (IST)
   const leadsByDate = leads.reduce((acc, lead) => {
-    const date = new Date(lead.date).toISOString().split("T")[0];
+    const date = getISTDateString(lead.date || lead.createdAt);
 
     if (!acc[date]) {
       acc[date] = {
-        date: lead.date,
+        date: date, // Keep YYYY-MM-DD string
         lead: 0,
       };
     }
@@ -236,7 +255,7 @@ const getLeadsGroupedByDateRouteCampaign = async (leads) => {
   const grouped = {};
 
   leads.forEach((lead) => {
-    const date = lead.date.toISOString().split("T")[0];
+    const date = getISTDateString(lead.date || lead.createdAt);
     const routeName = lead.route?.name || "Unknown Route";
     const campaignName = lead.campaign?.name || "Unknown Campaign";
 
