@@ -594,6 +594,8 @@ const getMonthlyLeadsByUser = async (req, res) => {
         updatedAt: true,
         sub1: true,
         sub2: true,
+        sub3: true,
+        sub4: true,
         campaign: {
           select: {
             id: true,
