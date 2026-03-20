@@ -9,6 +9,10 @@ const {
   getLeadsGroupedByDateRouteCampaign,
 } = require("../utils/chart-functions");
 const { addOrganizationFilter } = require("../utils/organization-utils");
+const logger = require("../utils/logger");
+
+const MAX_PAGE_LIMIT = 100;
+const MAX_EXPORT_LIMIT = 1000;
 
 
 const getLeads = async (req, res) => {
@@ -24,8 +28,9 @@ const getLeads = async (req, res) => {
       organizationId,
     } = req.query;
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const take = parseInt(limit);
+    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+    const take = Math.min(Math.max(parseInt(limit, 10) || 10, 1), MAX_PAGE_LIMIT);
+    const skip = (pageNumber - 1) * take;
 
     // Build where clause with organization filter
     const where = addOrganizationFilter(
@@ -71,11 +76,11 @@ const getLeads = async (req, res) => {
     res.json({
       leads,
       total,
-      page: parseInt(page),
-      limit: parseInt(limit),
+      page: pageNumber,
+      limit: take,
     });
   } catch (error) {
-    console.error("Error fetching leads:", error);
+    logger.error({ err: error }, "Error fetching leads");
     res.status(500).json({
       error: "Unable to fetch leads",
       details: error.message,
@@ -99,7 +104,6 @@ const addLead = async (req, res) => {
       apiKey,
     } = req.body;
 
-    console.log("addLead", req.body);
     // Validate required fields
     if (!firstName || !lastName || !phone || !apiKey || !campId) {
       return res.status(400).json({
@@ -235,7 +239,7 @@ const addLead = async (req, res) => {
           data: { webhookResponse },
         });
       } catch (webhookError) {
-        console.error("Webhook error:", webhookError);
+        logger.error({ err: webhookError }, "Webhook error");
         // Continue even if webhook fails
       }
     }
@@ -246,7 +250,7 @@ const addLead = async (req, res) => {
       lead: newLead,
     });
   } catch (error) {
-    console.error("Error adding lead:", error);
+    logger.error({ err: error }, "Error adding lead");
     res.status(500).json({
       error: "Unable to add lead",
       details: error.message,
@@ -259,7 +263,6 @@ const getLeadsByUser = async (req, res) => {
     const { userId } = req.auth;
       const { organizationId } = req.query;
 
-    console.log("User ID from auth:", userId);
     if (!userId) {
       return res.status(400).json({ error: "User ID not found" });
     }
@@ -316,6 +319,10 @@ const getLeadsByUser = async (req, res) => {
       }
     }
 
+    const exportLimit = Math.min(
+      Math.max(Number(req.query.limit) || 200, 1),
+      MAX_EXPORT_LIMIT
+    );
     const leads = await prismaClient.lead.findMany({
       where,
       select: {
@@ -325,12 +332,12 @@ const getLeadsByUser = async (req, res) => {
         campaign: { select: { id: true, name: true } },
         route: { select: { payout: true, name: true } },
       },
+      orderBy: { createdAt: "desc" },
+      take: exportLimit,
     });
-
-    console.log("Leads for user:", leads.length);
     res.status(200).json(leads);
   } catch (error) {
-    console.error("Error fetching user leads:", error);
+    logger.error({ err: error }, "Error fetching user leads");
     res.status(500).json({ error: "Unable to get leads", details: error.message });
   }
 };
@@ -343,8 +350,8 @@ const getLeadsByUserPagination = async (req, res) => {
     status = "all",
     organizationId,
   } = req.query;
-  const pageNumber = Math.max(Number(page), 1);
-  const take = Number(limit);
+  const pageNumber = Math.max(Number(page) || 1, 1);
+  const take = Math.min(Math.max(Number(limit) || 10, 1), MAX_PAGE_LIMIT);
   const skip = (pageNumber - 1) * take;
 
   try {
@@ -439,7 +446,7 @@ const getLeadsByUserPagination = async (req, res) => {
     const totalPages = Math.ceil(total / take);
     res.json({ data: leads, total, page: pageNumber, totalPages });
   } catch (error) {
-    console.error("Error fetching paginated leads:", error);
+    logger.error({ err: error }, "Error fetching paginated leads");
     res.status(500).json({ error: "Unable to get leads", details: error.message });
   }
 };
@@ -447,10 +454,8 @@ const getLeadsByUserPagination = async (req, res) => {
 const getMonthlyLeadsByUser = async (req, res) => {
   try {
     const { userId } = req.auth;
-    console.log("User ID from auth monthly:", userId);
 
     if (!userId) {
-      console.log("User ID not found");
       return res.status(400).json({ error: "User ID not found" });
     }
 
@@ -460,7 +465,6 @@ const getMonthlyLeadsByUser = async (req, res) => {
     });
 
     if (!user) {
-      console.log("User not found");
       return res.status(404).json({ error: "User not found" });
     }
 
@@ -484,14 +488,12 @@ const getMonthlyLeadsByUser = async (req, res) => {
         },
       };
     } else if (user.role === "webmaster") {
-      console.log("Webmaster found at get monthly leads by user", user.email);
       const webmaster = await prismaClient.webmaster.findUnique({
         where: { email: user.email },
         select: { campaigns: { select: { id: true } } },
       });
 
       if (!webmaster) {
-        console.log("Webmaster not found at get monthly leads by user");
         return res.status(404).json({ error: "Webmaster not found" });
       }
 
@@ -509,6 +511,10 @@ const getMonthlyLeadsByUser = async (req, res) => {
       return res.status(403).json({ error: "Unauthorized role" });
     }
 
+    const exportLimit = Math.min(
+      Math.max(Number(req.query.limit) || 500, 1),
+      MAX_EXPORT_LIMIT
+    );
     const leads = await prismaClient.lead.findMany({
       where,
       select: {
@@ -542,12 +548,12 @@ const getMonthlyLeadsByUser = async (req, res) => {
           },
         },
       },
+      orderBy: { createdAt: "desc" },
+      take: exportLimit,
     });
-
-    console.log("Leads from past 30 days for user:", leads.length);
     res.status(200).json(leads);
   } catch (error) {
-    console.error("Error fetching leads from past 30 days:", error);
+    logger.error({ err: error }, "Error fetching leads from past 30 days");
     res.status(500).json({
       error: "Unable to get leads from past 30 days",
       details: error.message,
@@ -558,7 +564,6 @@ const getMonthlyLeadsByUser = async (req, res) => {
 const getPastTenDaysLeadsByUser = async (req, res) => {
   try {
     const { userId } = req.auth;
-    console.log("User ID from auth 10 days:", userId);
     if (!userId) {
       return res.status(400).json({ error: "User ID not found" });
     }
@@ -615,6 +620,10 @@ const getPastTenDaysLeadsByUser = async (req, res) => {
       return res.status(403).json({ error: "Unauthorized role" });
     }
 
+    const exportLimit = Math.min(
+      Math.max(Number(req.query.limit) || 500, 1),
+      MAX_EXPORT_LIMIT
+    );
     const leads = await prismaClient.lead.findMany({
       where,
       select: {
@@ -644,12 +653,12 @@ const getPastTenDaysLeadsByUser = async (req, res) => {
           },
         },
       },
+      orderBy: { createdAt: "desc" },
+      take: exportLimit,
     });
-
-    console.log("Monthly leads for user:", leads.length);
     res.status(200).json(leads);
   } catch (error) {
-    console.error("Error fetching monthly leads:", error);
+    logger.error({ err: error }, "Error fetching monthly leads");
     res.status(500).json({
       error: "Unable to get monthly leads",
       details: error.message,

@@ -1,8 +1,14 @@
 const prismaClient = require("../utils/prismaClient");
+const logger = require("../utils/logger");
 
 const getRoutes = async (req, res) => {
-  const routes = await prismaClient.route.findMany();
-  res.json(routes);
+  const take = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+  const routes = await prismaClient.route.findMany({
+    where: { deletedAt: null },
+    orderBy: { createdAt: "desc" },
+    take,
+  });
+  res.json({ data: routes, limit: take });
 };
 
 const addRoute = async (req, res) => {
@@ -16,7 +22,6 @@ const addRoute = async (req, res) => {
     method,
     attributes,
   } = req.body;
-  console.log(req.body);
   try {
     const route = await prismaClient.route.create({
       data: {
@@ -33,7 +38,7 @@ const addRoute = async (req, res) => {
     });
     return res.status(201).json({ success: true, data: route });
   } catch (error) {
-    console.error(error);
+    logger.error({ err: error }, "Unable to create route");
     return res.status(500).json({
       error: "Unable to create route",
       details: error.message,
@@ -44,14 +49,12 @@ const addRoute = async (req, res) => {
 
 const getRouteById = async (req, res) => {
   const { id } = req.params;
-  console.log(id);
   try {
     const route = await prismaClient.route.findUnique({
       where: {
         id,
       },
     });
-    console.log(route);
     res.json(route);
   } catch (error) {
     res
@@ -90,7 +93,7 @@ const editRoute = async (req, res) => {
     });
     res.json(route);
   } catch (error) {
-    console.error(error);
+    logger.error({ err: error }, "Unable to update route");
     res
       .status(400)
       .json({ error: "Unable to update route", details: error.message });
@@ -104,6 +107,8 @@ const getRouteByUser = async (req, res) => {
       where: {
         AND: [{ userId }, { deletedAt: null }],
       },
+      orderBy: { createdAt: "desc" },
+      take: 500,
     });
     res.json(routes);
   } catch (error) {
@@ -115,8 +120,6 @@ const getRouteByUser = async (req, res) => {
 
 const deleteRouteById = async (req, res) => {
   const { id } = req.params;
-
-  console.log("delete route called...", id);
 
   try {
     const response = await prismaClient.route.update({
@@ -132,7 +135,7 @@ const deleteRouteById = async (req, res) => {
       data: response.id,
     });
   } catch (error) {
-    console.error("Error deleting route:", error);
+    logger.error({ err: error }, "Error deleting route");
     return res.status(500).json({
       error: "Unable to delete route",
       details: error.message,

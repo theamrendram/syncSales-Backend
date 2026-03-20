@@ -1,14 +1,15 @@
 const prisma = require("../utils/prismaClient");
 const { Webhook } = require("svix");
+const logger = require("../utils/logger");
+const { generateKey } = require("../utils/generate-key");
 
 // Handle Clerk webhook events
 const handleClerkWebhook = async (req, res) => {
   try {
     const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SIGNING_SECRET;
-    console.log("WEBHOOK_SECRET", WEBHOOK_SECRET);
 
     if (!WEBHOOK_SECRET) {
-      console.error("Missing CLERK_WEBHOOK_SECRET environment variable");
+      logger.error("Missing CLERK_WEBHOOK_SIGNING_SECRET environment variable");
       return res.status(500).json({ error: "Webhook secret not configured" });
     }
 
@@ -32,13 +33,13 @@ const handleClerkWebhook = async (req, res) => {
         "svix-signature": svix_signature,
       });
     } catch (err) {
-      console.error(" Webhook signature verification failed:", err);
+      logger.warn({ err }, "Webhook signature verification failed");
       return res.status(400).json({ error: "Invalid signature" });
     }
 
     // Extract event
     const { type, data } = evt;
-    console.log("✅ Webhook received:", type, "data:", data);
+    logger.info({ type }, "Webhook received");
 
     switch (type) {
       case "user.created":
@@ -51,24 +52,23 @@ const handleClerkWebhook = async (req, res) => {
         await handleUserDeleted(data);
         break;
       default:
-        console.log(`⚠️ Unhandled webhook event type: ${type}`);
+        logger.warn({ type }, "Unhandled webhook event type");
     }
 
     res.status(200).json({ success: true });
   } catch (error) {
-    console.error("Webhook error:", error);
+    logger.error({ err: error }, "Webhook error");
     res.status(500).json({ error: "Internal server error" });
   }
 };
 
 // Handle user creation
 async function handleUserCreated(data) {
-  console.log("handleUserCreated", data);
   try {
     const email = data.email_addresses[0]?.email_address;
 
     if (!email) {
-      console.error("No email found in user data");
+      logger.warn("No email found in user data");
       return;
     }
 
@@ -78,7 +78,7 @@ async function handleUserCreated(data) {
     });
 
     if (existingUser) {
-      console.log(`User with email ${email} already exists`);
+      logger.info({ email }, "User already exists");
       return;
     }
 
@@ -90,25 +90,23 @@ async function handleUserCreated(data) {
         firstName: data.first_name || "",
         lastName: data.last_name || "",
         role: "admin", // Default role as per schema
-        apiKey: Math.random().toString(36).substring(2, 15) +
-          Math.random().toString(36).substring(2, 15),
+        apiKey: generateKey(),
       },
     });
 
-    console.log(`User created successfully: ${user.email}`);
+    logger.info({ email: user.email }, "User created from webhook");
   } catch (error) {
-    console.error("Error creating user from webhook:", error);
+    logger.error({ err: error }, "Error creating user from webhook");
   }
 }
 
 // Handle user updates
 async function handleUserUpdated(data) {
-  console.log("handleUserUpdated", data);
   try {
     const email = data.email_addresses[0]?.email_address;
 
     if (!email) {
-      console.error("No email found in user data");
+      logger.warn("No email found in user data");
       return;
     }
 
@@ -117,7 +115,7 @@ async function handleUserUpdated(data) {
     });
 
     if (!user) {
-      console.log(`User with email ${email} not found for update`);
+      logger.info({ email }, "User not found for update");
       return;
     }
 
@@ -130,20 +128,19 @@ async function handleUserUpdated(data) {
       },
     });
 
-    console.log(`User updated successfully: ${email}`);
+    logger.info({ email }, "User updated from webhook");
   } catch (error) {
-    console.error("Error updating user from webhook:", error);
+    logger.error({ err: error }, "Error updating user from webhook");
   }
 }
 
 // Handle user deletion
 async function handleUserDeleted(data) {
-  console.log("handleUserDeleted", data);
   try {
     const email = data.email_addresses[0]?.email_address;
 
     if (!email) {
-      console.error("No email found in user data");
+      logger.warn("No email found in user data");
       return;
     }
 
@@ -152,7 +149,7 @@ async function handleUserDeleted(data) {
     });
 
     if (!user) {
-      console.log(`User with email ${email} not found for deletion`);
+      logger.info({ email }, "User not found for deletion");
       return;
     }
 
@@ -161,9 +158,9 @@ async function handleUserDeleted(data) {
       where: { email },
     });
 
-    console.log(`User deleted successfully: ${email}`);
+    logger.info({ email }, "User deleted from webhook");
   } catch (error) {
-    console.error("Error deleting user from webhook:", error);
+    logger.error({ err: error }, "Error deleting user from webhook");
   }
 }
 

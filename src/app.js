@@ -2,10 +2,14 @@ const express = require("express");
 const dotenv = require("dotenv");
 dotenv.config();
 const cors = require("cors");
+const pinoHttp = require("pino-http");
 const { clerkMiddleware, requireAuth } = require("@clerk/express");
-const { LeadsLimiter } = require("./middlewares/rate-limiter.middleware");
 const { checkUserPlan } = require("./utils/check-user-plan");
+const { config } = require("./config/env");
+const logger = require("./utils/logger");
 const app = express();
+app.disable("x-powered-by");
+app.set("query parser", "simple");
 
 const trustProxySetting = process.env.TRUST_PROXY;
 if (trustProxySetting === undefined) {
@@ -30,7 +34,6 @@ const campaignRoute = require("./routes/campaign.route");
 const leadsRoute = require("./routes/leads.route");
 const leadsApiRoute = require("./routes/leads-api.route");
 const postbackRoute = require("./routes/postback.route");
-const paymentRoute = require("./routes/payment.route");
 const webmasterRoute = require("./routes/webmaster.route");
 const subscriptionRoute = require("./routes/subscription.route");
 const organizationRoute = require("./routes/organization.route");
@@ -42,13 +45,25 @@ const { addUser } = require("./controllers/user.controller");
 // clerk webhook route -> do not protect this route or move it to the end of the middleware chain
 app.use("/api/v1/clerk-webhook", clerkWebhookRoute);
 
-app.use(express.json());
+app.use(
+  pinoHttp({
+    logger,
+    autoLogging: {
+      ignore: (req) => req.url === "/",
+    },
+    customLogLevel(req, res, err) {
+      if (err || res.statusCode >= 500) return "error";
+      if (res.statusCode >= 400) return "warn";
+      return "info";
+    },
+  })
+);
+app.use(express.json({ limit: config.requestLimit }));
 app.use(cors());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: config.requestLimit }));
 
 // leads api
 app.use("/api/v1/leads", checkUserPlan, leadsApiRoute);
-app.use("/api/v1/payment", paymentRoute);
 app.use("/api/v1/postback", postbackRoute);
 app.use("/api/v1/subscription", subscriptionRoute);
 
@@ -76,19 +91,19 @@ app.use("/api/v1/org/role", requireAuth(), roleRoute);
 
 // test route for webhook
 app.post("/webhook", (req, res) => {
-  console.log("req.body from lead -> webhook", req.body);
+  req.log.info("Lead webhook hit");
 
   res.send(req.body);
 });
 app.get("/webhook", (req, res) => {
-  console.log("req.body from lead -> webhook", req.body);
+  req.log.info("Lead webhook status check");
 
   res.send(req.body);
 });
 
 // Global error handling middleware
 app.use((err, req, res, next) => {
-  console.error("Error:", err);
+  req.log.error({ err }, "Unhandled request error");
   res.status(500).json({ message: "Internal Server Error" });
 });
 

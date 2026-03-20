@@ -1,4 +1,5 @@
 const prismaClient = require("../utils/prismaClient");
+const logger = require("../utils/logger");
 const {
   chartMetrics,
   generateExtendedReport,
@@ -7,6 +8,9 @@ const {
 
 const getChartData = async (req, res) => {
   try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 2000, 100), 5000);
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 90);
+    const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const { userId } = req.auth;
     if (!userId) {
       return res.status(400).json({ error: "User ID not found" });
@@ -30,7 +34,10 @@ const getChartData = async (req, res) => {
           .status(400)
           .json({ error: "Organization ID not found for admin" });
       }
-      where = { user: { organizationId: user.organizationId } };
+      where = {
+        user: { organizationId: user.organizationId },
+        createdAt: { gte: startDate },
+      };
     } else if (user.role === "webmaster") {
       const webmaster = await prismaClient.webmaster.findUnique({
         where: { email: user.email },
@@ -55,7 +62,10 @@ const getChartData = async (req, res) => {
         });
       }
 
-      where = { campaignId: { in: campaignIds } };
+      where = {
+        campaignId: { in: campaignIds },
+        createdAt: { gte: startDate },
+      };
     } else {
       return res.status(403).json({ error: "Unauthorized role" });
     }
@@ -66,6 +76,8 @@ const getChartData = async (req, res) => {
         campaign: { select: { name: true, campId: true } },
         route: { select: { payout: true, name: true, routeId: true } },
       },
+      orderBy: { createdAt: "desc" },
+      take: limit,
     });
     const extendedReport = generateExtendedReport(leads);
     const responseData = {
@@ -73,11 +85,12 @@ const getChartData = async (req, res) => {
       totalLeads: leads.length,
       metricData: chartMetrics(leads),
       extendedReport,
+      meta: { days, limit, returned: leads.length },
     };
 
     res.json(responseData);
   } catch (error) {
-    console.error("Error getting chart data:", error);
+    logger.error({ err: error }, "Error getting chart data");
     res.status(500).json({
       error: "Unable to get chart data",
       details: error.message,
@@ -86,8 +99,10 @@ const getChartData = async (req, res) => {
 };
 
 const getMetricData = async (req, res) => {
-  console.log("get metric data");
   try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 2000, 100), 5000);
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 90);
+    const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const { userId } = req.auth;
     if (!userId) {
       return res.status(400).json({ error: "User ID not found" });
@@ -111,7 +126,10 @@ const getMetricData = async (req, res) => {
           .status(400)
           .json({ error: "Organization ID not found for admin" });
       }
-      where = { user: { organizationId: user.organizationId } };
+      where = {
+        user: { organizationId: user.organizationId },
+        createdAt: { gte: startDate },
+      };
     } else if (user.role === "webmaster") {
       const webmaster = await prismaClient.webmaster.findUnique({
         where: { email: user.email },
@@ -136,7 +154,10 @@ const getMetricData = async (req, res) => {
         });
       }
 
-      where = { campaignId: { in: campaignIds } };
+      where = {
+        campaignId: { in: campaignIds },
+        createdAt: { gte: startDate },
+      };
     } else {
       return res.status(403).json({ error: "Unauthorized role" });
     }
@@ -147,12 +168,13 @@ const getMetricData = async (req, res) => {
         campaign: { select: { name: true, campId: true } },
         route: { select: { payout: true, name: true, routeId: true } },
       },
+      orderBy: { createdAt: "desc" },
+      take: limit,
     });
     const metricData = await chartMetrics(leads);
-    console.log("metric data", metricData);
-    res.status(200).json({ metricData: metricData });
+    res.status(200).json({ metricData, meta: { days, limit, returned: leads.length } });
   } catch (error) {
-    console.error("Error getting chart data:", error);
+    logger.error({ err: error }, "Error getting metric data");
     res.status(500).json({
       error: "Unable to get chart data",
       details: error.message,
