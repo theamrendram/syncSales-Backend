@@ -9,7 +9,15 @@ const checkUserPlan = async (req, res, next) => {
     }
     const user = await prismaClient.user.findUnique({
       where: { apiKey },
-      include: { userPlan: true },
+      select: {
+        id: true,
+        organizationId: true,
+        userPlan: {
+          select: {
+            dailyLeadsLimit: true,
+          },
+        },
+      },
     });
 
     if (!user) {
@@ -24,10 +32,15 @@ const checkUserPlan = async (req, res, next) => {
 
 
 
+    if (dailyLeadsLimit === 0) {
+      next();
+      return;
+    }
+
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
 
-    // Ensure usage row exists
+    // Ensure usage row exists only when there is an enforced limit.
     const usage = await prismaClient.leadUsage.upsert({
       where: {
         userId_date: {
@@ -43,11 +56,6 @@ const checkUserPlan = async (req, res, next) => {
         organizationId: user.organizationId,
       },
     });
-    console.log("dailyLeadsLimit", dailyLeadsLimit);
-    if (dailyLeadsLimit === 0) {
-      next();
-      return;
-    }
 
     if (usage.count >= dailyLeadsLimit) {
       return res.status(429).json({ error: "Daily lead limit reached" });

@@ -1,10 +1,10 @@
-const { PrismaClient } = require("../utils/prismaClient");
+const prismaClient = require("../utils/prismaClient");
 const jwt = require("jsonwebtoken");
 
 const loginUser = async (req, res) => {
     const {email, password} = req.body;
 
-    const user = await PrismaClient.user.findUnique({
+    const user = await prismaClient.user.findUnique({
         where: {
             email
         }

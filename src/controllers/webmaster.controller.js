@@ -1,6 +1,5 @@
-const { PrismaClient } = require("@prisma/client");
 const { clerkClient } = require("@clerk/express");
-const prismaClient = new PrismaClient();
+const prismaClient = require("../utils/prismaClient");
 
 const addWebmaster = async (req, res) => {
   const { email: emailAddress, password, fullName, campaigns } = await req.body;

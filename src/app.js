@@ -7,6 +7,20 @@ const { LeadsLimiter } = require("./middlewares/rate-limiter.middleware");
 const { checkUserPlan } = require("./utils/check-user-plan");
 const app = express();
 
+const trustProxySetting = process.env.TRUST_PROXY;
+if (trustProxySetting === undefined) {
+  // Most production deployments sit behind at least one reverse proxy/LB.
+  app.set("trust proxy", 1);
+} else if (trustProxySetting === "true") {
+  app.set("trust proxy", true);
+} else if (trustProxySetting === "false") {
+  app.set("trust proxy", false);
+} else if (!Number.isNaN(Number(trustProxySetting))) {
+  app.set("trust proxy", Number(trustProxySetting));
+} else {
+  app.set("trust proxy", trustProxySetting);
+}
+
 // Routes
 const routeRoute = require("./routes/route.route");
 const userRoute = require("./routes/user.route");

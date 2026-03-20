@@ -1,6 +1,4 @@
-const { PrismaClient } = require("@prisma/client");
-
-const prismaClient = new PrismaClient();
+const prismaClient = require("../utils/prismaClient");
 
 const addWebhook = async (req, res) => {
   const { name, url, method, attributes } = req.body;

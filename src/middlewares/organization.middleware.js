@@ -1,5 +1,4 @@
-const { PrismaClient } = require("@prisma/client");
-const prisma = new PrismaClient();
+const prisma = require("../utils/prismaClient");
 
 // Middleware to check if user is member of organization
 const requireOrganizationMembership = async (req, res, next) => {

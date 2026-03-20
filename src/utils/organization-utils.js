@@ -1,5 +1,4 @@
-const { PrismaClient } = require("@prisma/client");
-const prisma = new PrismaClient();
+const prisma = require("./prismaClient");
 
 // Get user's organization context
 const getUserOrganizationContext = async (userId) => {

@@ -1,5 +1,4 @@
-const { PrismaClient } = require("@prisma/client");
-const prisma = new PrismaClient();
+const prisma = require("../utils/prismaClient");
 
 // Create a new organization
 const createOrganization = async (req, res) => {

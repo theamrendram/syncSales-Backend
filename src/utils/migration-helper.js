@@ -1,5 +1,4 @@
-const { PrismaClient } = require("@prisma/client");
-const prisma = new PrismaClient();
+const prisma = require("./prismaClient");
 
 // Migration script to set up organizations for existing users
 const migrateExistingUsersToOrganizations = async () => {
