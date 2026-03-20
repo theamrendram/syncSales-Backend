@@ -36,6 +36,23 @@ const addWebmaster = async (req, res) => {
       },
     });
 
+    // Create a User record in DB using the Clerk user ID as the primary key.
+    // All controllers (chart, leads, etc.) look up users via prismaClient.user.findUnique({ where: { id: clerkUserId } }).
+    // Without this record the webmaster gets "User not found" on every authenticated request.
+    await prismaClient.user.create({
+      data: {
+        id: response.id, // Clerk user ID — must match what req.auth.userId returns on login
+        firstName: fullName.split(" ")[0],
+        lastName: fullName.split(" ")[1] || "",
+        email,
+        password,
+        role: "webmaster",
+        apiKey:
+          Math.random().toString(36).substring(2, 15) +
+          Math.random().toString(36).substring(2, 15),
+      },
+    });
+
     // Format campaign IDs for Prisma connection
     const campaignConnections = Array.isArray(campaigns)
       ? campaigns.map((campaignId) => ({
@@ -44,14 +61,15 @@ const addWebmaster = async (req, res) => {
       : [];
 
     // Create webmaster with campaign connections
+    // userId here is the *owner/admin* who created this webmaster
     const webmaster = await prismaClient.webmaster.create({
       data: {
         email,
         firstName: fullName.split(" ")[0],
         lastName: fullName.split(" ")[1] || "",
         password,
-        userId, // This associates the webmaster with the user
-        apiKey: response.id,
+        userId, // The owner/admin user ID
+        apiKey: response.id, // Clerk user ID of the webmaster
         // Connect to existing campaigns
         campaigns: {
           connect: campaignConnections,
@@ -76,6 +94,14 @@ const addWebmaster = async (req, res) => {
     });
   } catch (error) {
     console.log("error", error);
+    // Extract Clerk-specific error messages when available
+    if (error.clerkError && Array.isArray(error.errors) && error.errors.length > 0) {
+      const clerkError = error.errors[0];
+      return res.status(422).json({
+        error: clerkError.longMessage || clerkError.message || "Unable to create webmaster",
+        code: clerkError.code,
+      });
+    }
     res
       .status(400)
       .json({ error: "Unable to create webmaster", details: error.message });
@@ -178,6 +204,11 @@ const deleteWebmaster = async (req, res) => {
 
     await prismaClient.webmaster.delete({
       where: { id },
+    });
+
+    // Also delete the corresponding User record (its id = the Clerk user ID stored in apiKey)
+    await prismaClient.user.deleteMany({
+      where: { id: currentWebmaster.apiKey },
     });
 
     await clerkClient.users.deleteUser(currentWebmaster.apiKey);
