@@ -13,6 +13,9 @@ const logger = require("../utils/logger");
 
 const MAX_PAGE_LIMIT = 100;
 const MAX_EXPORT_LIMIT = 1000;
+const leadModelHasOrgLeadId = !!prismaClient?._runtimeDataModel?.models?.Lead?.fields?.some(
+  (field) => field.name === "orgLeadId"
+);
 
 
 const getLeads = async (req, res) => {
@@ -179,18 +182,20 @@ const addLead = async (req, res) => {
         return prismaClient.lead.create({ data: leadCreateData });
       }
       return prismaClient.$transaction(async (tx) => {
-        // Allocate next per-organization integer id.
-        const counter = await tx.orgLeadCounter.upsert({
-          where: { organizationId },
-          create: { organizationId, nextValue: 1 },
-          update: { nextValue: { increment: 1 } },
-        });
-        const orgLeadId = counter.nextValue;
+        const counterRows = await tx.$queryRaw`
+          INSERT INTO "OrgLeadCounter" ("organizationId", "nextValue")
+          VALUES (${organizationId}, 1)
+          ON CONFLICT ("organizationId")
+          DO UPDATE SET "nextValue" = "OrgLeadCounter"."nextValue" + 1
+          RETURNING "nextValue";
+        `;
+        const orgLeadId = Number(counterRows?.[0]?.nextValue || 1);
+
         return tx.lead.create({
           data: {
             ...leadCreateData,
             organizationId,
-            orgLeadId,
+            ...(leadModelHasOrgLeadId ? { orgLeadId } : {}),
           },
         });
       });

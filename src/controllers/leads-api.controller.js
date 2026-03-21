@@ -1,8 +1,13 @@
 const prismaClient = require("../utils/prismaClient");
+const { randomUUID } = require("crypto");
 const { sendWebhook } = require("../utils/sendWebhook");
 const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
 const getIpAndCountry = require("../utils/get-ip-and-country");
 const { encodePublicOrgLeadId } = require("../utils/org-lead-id");
+
+const leadModelHasOrgLeadId = !!prismaClient?._runtimeDataModel?.models?.Lead?.fields?.some(
+  (field) => field.name === "orgLeadId"
+);
 
 // ----- START utility functions ------
 const createLead = async (leadData, userId, organizationId) => {
@@ -11,41 +16,34 @@ const createLead = async (leadData, userId, organizationId) => {
 
   // Use transaction for atomicity and upsert for leadUsage to prevent failures
   return await prismaClient.$transaction(async (tx) => {
-    // Allocate next per-organization integer id.
-    const counter = await tx.orgLeadCounter.upsert({
-      where: { organizationId },
-      create: { organizationId, nextValue: 1 },
-      update: { nextValue: { increment: 1 } },
-    });
-    const orgLeadId = counter.nextValue;
+    const counterRows = await tx.$queryRaw`
+      INSERT INTO "OrgLeadCounter" ("organizationId", "nextValue")
+      VALUES (${organizationId}, 1)
+      ON CONFLICT ("organizationId")
+      DO UPDATE SET "nextValue" = "OrgLeadCounter"."nextValue" + 1
+      RETURNING "nextValue";
+    `;
+    const orgLeadId = Number(counterRows?.[0]?.nextValue || 1);
 
     const lead = await tx.lead.create({
       data: {
         ...leadData,
         organizationId,
-        orgLeadId,
+        ...(leadModelHasOrgLeadId ? { orgLeadId } : {}),
       },
     });
 
-    // Upsert ensures the record exists, preventing update failures
-    await tx.leadUsage.upsert({
-      where: {
-        userId_date: {
-          userId: userId,
-          date: today,
-        },
-      },
-      update: {
-        count: {
-          increment: 1,
-        },
-      },
-      create: {
-        userId: userId,
-        date: today,
-        count: 1,
-      },
-    });
+    try {
+      await tx.$executeRaw`
+        INSERT INTO "LeadUsage" ("id", "userId", "date", "count")
+        VALUES (${randomUUID()}, ${userId}, ${today}, 1)
+        ON CONFLICT ("userId", "date")
+        DO UPDATE SET "count" = "LeadUsage"."count" + 1;
+      `;
+    } catch (usageError) {
+      // Usage tracking should never block lead creation in production.
+      console.error("Lead usage update failed:", usageError.message);
+    }
 
     return lead;
   });
