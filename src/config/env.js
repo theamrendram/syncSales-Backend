@@ -24,7 +24,7 @@ const config = {
   memoryMonitorEnabled: parseBoolean(process.env.MEMORY_MONITOR_ENABLED, true),
   memoryMonitorIntervalMs: parseNumber(
     process.env.MEMORY_MONITOR_INTERVAL_MS,
-    60000
+    600000 // 10 minutes
   ),
 };
 

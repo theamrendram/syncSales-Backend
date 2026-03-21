@@ -20,7 +20,7 @@ model User {
   updatedAt               DateTime             @updatedAt
   address                 String?
   phone                   String?
-  organizationId          String?              @unique
+  organizationId          String?              
   campaigns               Campaign[]
   leads                   Lead[]
   ownedOrganization       Organization?        @relation("Owner")

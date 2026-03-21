@@ -7,6 +7,18 @@ const addWebmaster = async (req, res) => {
   const { userId } = req.auth;
   const email = emailAddress.toLowerCase();
   try {
+    const ownerOrganization = await prismaClient.organization.findUnique({
+      where: { ownerId: userId },
+      select: { id: true },
+    });
+
+    if (!ownerOrganization?.id) {
+      return res.status(400).json({
+        error:
+          "Owner organization not found. Create an organization before adding webmasters.",
+      });
+    }
+
     const existingUser = await prismaClient.webmaster.findUnique({
       where: {
         email,
@@ -35,6 +47,9 @@ const addWebmaster = async (req, res) => {
       },
     });
 
+    // Keep apiKey in sync across User and Webmaster tables.
+    const sharedApiKey = response.id;
+
     // Create a User record in DB using the Clerk user ID as the primary key.
     // All controllers (chart, leads, etc.) look up users via prismaClient.user.findUnique({ where: { id: clerkUserId } }).
     // Without this record the webmaster gets "User not found" on every authenticated request.
@@ -46,9 +61,8 @@ const addWebmaster = async (req, res) => {
         email,
         password,
         role: "webmaster",
-        apiKey:
-          Math.random().toString(36).substring(2, 15) +
-          Math.random().toString(36).substring(2, 15),
+        apiKey: sharedApiKey,
+        organizationId: ownerOrganization.id,
       },
     });
 
@@ -68,7 +82,8 @@ const addWebmaster = async (req, res) => {
         lastName: fullName.split(" ")[1] || "",
         password,
         userId, // The owner/admin user ID
-        apiKey: response.id, // Clerk user ID of the webmaster
+        apiKey: sharedApiKey, // Keep in sync with User.apiKey
+        organizationId: ownerOrganization.id,
         // Connect to existing campaigns
         campaigns: {
           connect: campaignConnections,
