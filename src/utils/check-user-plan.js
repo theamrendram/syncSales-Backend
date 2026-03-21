@@ -1,4 +1,5 @@
 const prismaClient = require("./prismaClient");
+const { resolveApiKeyPrincipal } = require("./api-key-principal");
 
 const checkUserPlan = async (req, res, next) => {
   try {
@@ -7,8 +8,23 @@ const checkUserPlan = async (req, res, next) => {
     if (!apiKey) {
       return res.status(400).json({ error: "API key is required" });
     }
+    const principal = await resolveApiKeyPrincipal(apiKey);
+    if (!principal) {
+      return res.status(401).json({ error: "Invalid API key" });
+    }
+
+    if (!principal.organizationId) {
+      return res.status(400).json({
+        error: "API key must belong to an organization",
+      });
+    }
+
+    if (principal.type === "webmaster" && !principal.isActive) {
+      return res.status(403).json({ error: "Webmaster is inactive" });
+    }
+
     const user = await prismaClient.user.findUnique({
-      where: { apiKey },
+      where: { id: principal.planUserId },
       select: {
         id: true,
         organizationId: true,
@@ -20,15 +36,26 @@ const checkUserPlan = async (req, res, next) => {
       },
     });
 
-    if (!user) {
-      return res.status(401).json({ error: "Invalid API key" });
-    }
+    const orgUserPlan = !user?.userPlan
+      ? await prismaClient.userPlan.findFirst({
+          where: { organizationId: principal.organizationId },
+          orderBy: { createdAt: "desc" },
+          select: { dailyLeadsLimit: true },
+        })
+      : null;
 
-    if (!user.userPlan) {
+    const effectivePlan = user?.userPlan || orgUserPlan;
+    if (!effectivePlan) {
       return res.status(403).json({ error: "User plan not found" });
     }
 
-    const { dailyLeadsLimit } = user.userPlan;
+    const usageUserId =
+      user?.id || principal.planUserId || principal.actorUserId || null;
+    if (!usageUserId) {
+      return res.status(401).json({ error: "Invalid API key owner" });
+    }
+
+    const { dailyLeadsLimit } = effectivePlan;
 
 
 
@@ -44,16 +71,16 @@ const checkUserPlan = async (req, res, next) => {
     const usage = await prismaClient.leadUsage.upsert({
       where: {
         userId_date: {
-          userId: user.id,
+          userId: usageUserId,
           date: today,
         },
       },
       update: {},
       create: {
-        userId: user.id,
+        userId: usageUserId,
         date: today,
         count: 0,
-        organizationId: user.organizationId,
+        organizationId: principal.organizationId || user?.organizationId,
       },
     });
 

@@ -4,13 +4,15 @@ const { sendWebhook } = require("../utils/sendWebhook");
 const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
 const getIpAndCountry = require("../utils/get-ip-and-country");
 const { encodePublicOrgLeadId } = require("../utils/org-lead-id");
+const { resolveApiKeyPrincipal } = require("../utils/api-key-principal");
 
-const leadModelHasOrgLeadId = !!prismaClient?._runtimeDataModel?.models?.Lead?.fields?.some(
-  (field) => field.name === "orgLeadId"
-);
+const leadModelHasOrgLeadId =
+  !!prismaClient?._runtimeDataModel?.models?.Lead?.fields?.some(
+    (field) => field.name === "orgLeadId",
+  );
 
 // ----- START utility functions ------
-const createLead = async (leadData, userId, organizationId) => {
+const createLead = async (leadData, usageUserId, organizationId) => {
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
 
@@ -36,7 +38,7 @@ const createLead = async (leadData, userId, organizationId) => {
     try {
       await tx.$executeRaw`
         INSERT INTO "LeadUsage" ("id", "userId", "date", "count")
-        VALUES (${randomUUID()}, ${userId}, ${today}, 1)
+        VALUES (${randomUUID()}, ${usageUserId}, ${today}, 1)
         ON CONFLICT ("userId", "date")
         DO UPDATE SET "count" = "LeadUsage"."count" + 1;
       `;
@@ -80,18 +82,18 @@ const handleWebhookAsync = async (route, lead) => {
 
 const handleDuplicateLead = async (
   leadData,
-  userWithCampaign,
+  principalWithCampaign,
   organizationId,
-  res
+  res,
 ) => {
   const duplicateLead = await createLead(
     { ...leadData, status: "Duplicate" },
-    userWithCampaign.id,
-    organizationId
+    principalWithCampaign.usageUserId,
+    organizationId,
   );
 
   // Send response immediately, handle webhook asynchronously
-  const route = userWithCampaign.campaigns[0]?.route;
+  const route = principalWithCampaign.campaigns[0]?.route;
   if (route?.hasWebhook) {
     // Fire and forget - don't block response
     handleWebhookAsync(route, duplicateLead).catch((err) => {
@@ -107,14 +109,18 @@ const handleDuplicateLead = async (
 
 const handleNewLead = async (
   leadData,
-  userWithCampaign,
+  principalWithCampaign,
   organizationId,
-  res
+  res,
 ) => {
-  const lead = await createLead(leadData, userWithCampaign.id, organizationId);
+  const lead = await createLead(
+    leadData,
+    principalWithCampaign.usageUserId,
+    organizationId,
+  );
 
   // Send response immediately, handle webhook asynchronously
-  const route = userWithCampaign.campaigns[0]?.route;
+  const route = principalWithCampaign.campaigns[0]?.route;
   if (route?.hasWebhook) {
     // Fire and forget - don't block response
     handleWebhookAsync(route, lead).catch((err) => {
@@ -129,31 +135,126 @@ const handleNewLead = async (
   });
 };
 
-const getUserWithCampaign = async (apiKey, campId) => {
-  return await prismaClient.user.findUnique({
-    where: { apiKey },
-    select: {
-      id: true,
-      campaigns: {
-        where: { campId },
-        select: {
-          id: true,
-          routeId: true,
-          lead_period: true,
-          organizationId: true,
-          route: {
-            select: {
-              url: true,
-              method: true,
-              attributes: true,
-              hasWebhook: true,
-              organizationId: true,
+const getPrincipalWithCampaign = async (apiKey, campId) => {
+  const principal = await resolveApiKeyPrincipal(apiKey);
+  if (!principal) {
+    return null;
+  }
+
+  if (principal.type === "user") {
+    const userWithCampaign = await prismaClient.user.findUnique({
+      where: { apiKey: principal.apiKey },
+      select: {
+        id: true,
+        campaigns: {
+          where: { campId },
+          select: {
+            id: true,
+            routeId: true,
+            lead_period: true,
+            organizationId: true,
+            route: {
+              select: {
+                url: true,
+                method: true,
+                attributes: true,
+                hasWebhook: true,
+                organizationId: true,
+              },
             },
           },
         },
       },
+    });
+
+    if (!userWithCampaign) {
+      return null;
+    }
+
+    return {
+      ...principal,
+      id: userWithCampaign.id,
+      usageUserId: principal.planUserId,
+      campaigns: userWithCampaign.campaigns,
+    };
+  }
+
+  const webmaster = await prismaClient.webmaster.findUnique({
+    where: { id: principal.webmasterId },
+    select: {
+      id: true,
+      userId: true,
+      organizationId: true,
+      isActive: true,
     },
   });
+
+  if (!webmaster) {
+    return null;
+  }
+
+  const campaign = await prismaClient.campaign.findFirst({
+    where: {
+      campId,
+      organizationId: webmaster.organizationId || principal.organizationId || undefined,
+      webmasterId: webmaster.id,
+    },
+    select: {
+      id: true,
+      routeId: true,
+      lead_period: true,
+      organizationId: true,
+      route: {
+        select: {
+          url: true,
+          method: true,
+          attributes: true,
+          hasWebhook: true,
+          organizationId: true,
+        },
+      },
+    },
+  });
+
+  return {
+    ...principal,
+    id: principal.actorUserId,
+    usageUserId: principal.planUserId,
+    campaigns: campaign ? [campaign] : [],
+    organizationId: webmaster.organizationId ?? principal.organizationId,
+    isActive: webmaster.isActive,
+  };
+};
+
+const resolveLeadOrganizationId = async (principalWithCampaign, campaign) => {
+  const campaignOrganizationId =
+    campaign?.organizationId ?? campaign?.route?.organizationId ?? null;
+  if (campaignOrganizationId) {
+    return campaignOrganizationId;
+  }
+
+  if (principalWithCampaign?.organizationId) {
+    return principalWithCampaign.organizationId;
+  }
+
+  if (principalWithCampaign?.type !== "user" || !principalWithCampaign?.id) {
+    return null;
+  }
+
+  const membership = await prismaClient.organizationMember.findFirst({
+    where: {
+      userId: principalWithCampaign.id,
+      status: "active",
+    },
+    select: {
+      organizationId: true,
+    },
+    orderBy: {
+      joinedAt: "asc",
+    },
+  });
+
+  return membership?.organizationId ?? null;
 };
 // ----- END utility functions ------
 
@@ -193,22 +294,48 @@ const processLeadRequest = async (req, res, source) => {
   }
 
   try {
-    const userWithCampaign = await getUserWithCampaign(apiKey, campId);
-    if (!userWithCampaign) {
+    const principalWithCampaign = await getPrincipalWithCampaign(
+      apiKey,
+      campId,
+    );
+    if (!principalWithCampaign) {
       return res.status(400).json({ error: "Invalid API key" });
     }
 
-    const campaign = userWithCampaign.campaigns[0];
+    if (principalWithCampaign.type === "webmaster") {
+      if (!principalWithCampaign.isActive) {
+        return res.status(403).json({ error: "Webmaster is inactive" });
+      }
+
+      if (!principalWithCampaign.organizationId) {
+        return res.status(400).json({
+          error: "Webmaster API key must belong to an organization",
+        });
+      }
+    }
+
+    const campaign = principalWithCampaign.campaigns[0];
     if (!campaign) {
       return res.status(400).json({ error: "Invalid campaign ID" });
     }
 
-    const organizationId =
-      campaign.organizationId ?? campaign.route?.organizationId ?? null;
+    const organizationId = await resolveLeadOrganizationId(
+      principalWithCampaign,
+      campaign,
+    );
     if (!organizationId) {
       return res.status(400).json({
         error:
           "Campaign must be linked to an organization for lead ID assignment",
+      });
+    }
+
+    if (
+      principalWithCampaign.type === "webmaster" &&
+      principalWithCampaign.organizationId !== organizationId
+    ) {
+      return res.status(403).json({
+        error: "Webmaster organization does not match campaign organization",
       });
     }
 
@@ -228,19 +355,24 @@ const processLeadRequest = async (req, res, source) => {
       sub4: sub4 || null,
       campaignId: campaign.id,
       routeId: campaign.routeId,
-      userId: userWithCampaign.id,
+      userId: principalWithCampaign.id,
     };
 
     if (isDuplicate) {
       return await handleDuplicateLead(
         leadData,
-        userWithCampaign,
+        principalWithCampaign,
         organizationId,
-        res
+        res,
       );
     }
 
-    return await handleNewLead(leadData, userWithCampaign, organizationId, res);
+    return await handleNewLead(
+      leadData,
+      principalWithCampaign,
+      organizationId,
+      res,
+    );
   } catch (error) {
     console.error("Error processing lead:", error);
     return res.status(400).json({
