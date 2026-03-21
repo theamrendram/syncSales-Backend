@@ -50,9 +50,16 @@ model Organization {
   routes        Route[]
   subscriptions Subscription[]
   userPlans     UserPlan[]
-  webmasters    Webmaster[]
+  webmasters       Webmaster[]
+  orgLeadCounter   OrgLeadCounter?
 
   @@index([ownerId])
+}
+
+model OrgLeadCounter {
+  organizationId String       @id
+  nextValue      Int          @default(0)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 }
 
 model Role {
@@ -195,6 +202,7 @@ model Lead {
   campaignId      String?
   routeId         String
   userId          String
+  orgLeadId       Int?
   date            DateTime      @default(now())
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
@@ -208,6 +216,7 @@ model Lead {
   route           Route         @relation(fields: [routeId], references: [id])
   user            User          @relation(fields: [userId], references: [id])
 
+  @@unique([organizationId, orgLeadId])
   @@index([status])
   @@index([date])
   @@index([userId])

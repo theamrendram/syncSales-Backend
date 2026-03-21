@@ -2,15 +2,30 @@ const prismaClient = require("../utils/prismaClient");
 const { sendWebhook } = require("../utils/sendWebhook");
 const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
 const getIpAndCountry = require("../utils/get-ip-and-country");
+const { encodePublicOrgLeadId } = require("../utils/org-lead-id");
 
 // ----- START utility functions ------
-const createLead = async (leadData, userId) => {
+const createLead = async (leadData, userId, organizationId) => {
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
 
   // Use transaction for atomicity and upsert for leadUsage to prevent failures
   return await prismaClient.$transaction(async (tx) => {
-    const lead = await tx.lead.create({ data: leadData });
+    // Allocate next per-organization integer id.
+    const counter = await tx.orgLeadCounter.upsert({
+      where: { organizationId },
+      create: { organizationId, nextValue: 1 },
+      update: { nextValue: { increment: 1 } },
+    });
+    const orgLeadId = counter.nextValue;
+
+    const lead = await tx.lead.create({
+      data: {
+        ...leadData,
+        organizationId,
+        orgLeadId,
+      },
+    });
 
     // Upsert ensures the record exists, preventing update failures
     await tx.leadUsage.upsert({
@@ -65,10 +80,16 @@ const handleWebhookAsync = async (route, lead) => {
   }
 };
 
-const handleDuplicateLead = async (leadData, userWithCampaign, res) => {
+const handleDuplicateLead = async (
+  leadData,
+  userWithCampaign,
+  organizationId,
+  res
+) => {
   const duplicateLead = await createLead(
     { ...leadData, status: "Duplicate" },
-    userWithCampaign.id
+    userWithCampaign.id,
+    organizationId
   );
 
   // Send response immediately, handle webhook asynchronously
@@ -80,13 +101,19 @@ const handleDuplicateLead = async (leadData, userWithCampaign, res) => {
     });
   }
 
-  return res
-    .status(400)
-    .json({ lead_id: duplicateLead.id, status: "Duplicate" });
+  return res.status(400).json({
+    lead_id: encodePublicOrgLeadId(duplicateLead.orgLeadId),
+    status: "Duplicate",
+  });
 };
 
-const handleNewLead = async (leadData, userWithCampaign, res) => {
-  const lead = await createLead(leadData, userWithCampaign.id);
+const handleNewLead = async (
+  leadData,
+  userWithCampaign,
+  organizationId,
+  res
+) => {
+  const lead = await createLead(leadData, userWithCampaign.id, organizationId);
 
   // Send response immediately, handle webhook asynchronously
   const route = userWithCampaign.campaigns[0]?.route;
@@ -97,9 +124,11 @@ const handleNewLead = async (leadData, userWithCampaign, res) => {
     });
   }
 
-  return res
-    .status(201)
-    .json({ success: true, lead_id: lead.id, status: lead.status });
+  return res.status(201).json({
+    success: true,
+    lead_id: encodePublicOrgLeadId(lead.orgLeadId),
+    status: lead.status,
+  });
 };
 
 const getUserWithCampaign = async (apiKey, campId) => {
@@ -113,12 +142,14 @@ const getUserWithCampaign = async (apiKey, campId) => {
           id: true,
           routeId: true,
           lead_period: true,
+          organizationId: true,
           route: {
             select: {
               url: true,
               method: true,
               attributes: true,
               hasWebhook: true,
+              organizationId: true,
             },
           },
         },
@@ -174,6 +205,15 @@ const processLeadRequest = async (req, res, source) => {
       return res.status(400).json({ error: "Invalid campaign ID" });
     }
 
+    const organizationId =
+      campaign.organizationId ?? campaign.route?.organizationId ?? null;
+    if (!organizationId) {
+      return res.status(400).json({
+        error:
+          "Campaign must be linked to an organization for lead ID assignment",
+      });
+    }
+
     const isDuplicate = await checkDuplicateLead(sanitizedPhone, campaign);
     const leadData = {
       firstName: firstName.trim(),
@@ -194,10 +234,15 @@ const processLeadRequest = async (req, res, source) => {
     };
 
     if (isDuplicate) {
-      return await handleDuplicateLead(leadData, userWithCampaign, res);
+      return await handleDuplicateLead(
+        leadData,
+        userWithCampaign,
+        organizationId,
+        res
+      );
     }
 
-    return await handleNewLead(leadData, userWithCampaign, res);
+    return await handleNewLead(leadData, userWithCampaign, organizationId, res);
   } catch (error) {
     console.error("Error processing lead:", error);
     return res.status(400).json({

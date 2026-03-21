@@ -172,38 +172,32 @@ const addLead = async (req, res) => {
 
     // Check for duplicate lead
     const isDuplicate = await checkDuplicateLead(phone, campaign);
+    const organizationId = campaign.organizationId;
+
+    const createLeadWithOrgCounter = async (leadCreateData) => {
+      if (!organizationId) {
+        return prismaClient.lead.create({ data: leadCreateData });
+      }
+      return prismaClient.$transaction(async (tx) => {
+        // Allocate next per-organization integer id.
+        const counter = await tx.orgLeadCounter.upsert({
+          where: { organizationId },
+          create: { organizationId, nextValue: 1 },
+          update: { nextValue: { increment: 1 } },
+        });
+        const orgLeadId = counter.nextValue;
+        return tx.lead.create({
+          data: {
+            ...leadCreateData,
+            organizationId,
+            orgLeadId,
+          },
+        });
+      });
+    };
+
     if (isDuplicate) {
-      const duplicateLead = await prismaClient.lead.create({
-        data: {
-          firstName,
-          lastName,
-          phone,
-          email,
-          address,
-          ip,
-          country,
-          sub1,
-          sub2,
-          sub3,
-          sub4,
-          status: "duplicate",
-          userId: userWithCampaign.id,
-          organizationId: campaign.organizationId,
-          routeId: campaign.routeId,
-          campaignId: campaign.id,
-        },
-      });
-
-      return res.json({
-        success: false,
-        message: "Duplicate lead detected",
-        lead: duplicateLead,
-      });
-    }
-
-    // Create new lead
-    const newLead = await prismaClient.lead.create({
-      data: {
+      const duplicateLead = await createLeadWithOrgCounter({
         firstName,
         lastName,
         phone,
@@ -215,12 +209,36 @@ const addLead = async (req, res) => {
         sub2,
         sub3,
         sub4,
-        status: "new",
+        status: "duplicate",
         userId: userWithCampaign.id,
-        organizationId: campaign.organizationId,
         routeId: campaign.routeId,
         campaignId: campaign.id,
-      },
+      });
+
+      return res.json({
+        success: false,
+        message: "Duplicate lead detected",
+        lead: duplicateLead,
+      });
+    }
+
+    // Create new lead
+    const newLead = await createLeadWithOrgCounter({
+      firstName,
+      lastName,
+      phone,
+      email,
+      address,
+      ip,
+      country,
+      sub1,
+      sub2,
+      sub3,
+      sub4,
+      status: "new",
+      userId: userWithCampaign.id,
+      routeId: campaign.routeId,
+      campaignId: campaign.id,
     });
 
     // Send webhook if configured
