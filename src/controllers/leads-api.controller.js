@@ -146,7 +146,7 @@ const getPrincipalWithCampaign = async (apiKey, campId) => {
       where: { apiKey: principal.apiKey },
       select: {
         id: true,
-        campaigns: {
+        ownedCampaigns: {
           where: { campId },
           select: {
             id: true,
@@ -175,29 +175,15 @@ const getPrincipalWithCampaign = async (apiKey, campId) => {
       ...principal,
       id: userWithCampaign.id,
       usageUserId: principal.planUserId,
-      campaigns: userWithCampaign.campaigns,
+      campaigns: userWithCampaign.ownedCampaigns,
     };
-  }
-
-  const webmaster = await prismaClient.webmaster.findUnique({
-    where: { id: principal.webmasterId },
-    select: {
-      id: true,
-      userId: true,
-      organizationId: true,
-      isActive: true,
-    },
-  });
-
-  if (!webmaster) {
-    return null;
   }
 
   const campaign = await prismaClient.campaign.findFirst({
     where: {
       campId,
-      organizationId: webmaster.organizationId || principal.organizationId || undefined,
-      webmasterId: webmaster.id,
+      organizationId: principal.organizationId || undefined,
+      webmasterUserId: principal.actorUserId,
     },
     select: {
       id: true,
@@ -221,8 +207,8 @@ const getPrincipalWithCampaign = async (apiKey, campId) => {
     id: principal.actorUserId,
     usageUserId: principal.planUserId,
     campaigns: campaign ? [campaign] : [],
-    organizationId: webmaster.organizationId ?? principal.organizationId,
-    isActive: webmaster.isActive,
+    organizationId: principal.organizationId,
+    isActive: principal.isActive,
   };
 };
 

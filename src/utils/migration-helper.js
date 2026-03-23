@@ -113,37 +113,30 @@ const migrateExistingUsersToOrganizations = async () => {
 
         console.log(`Added user as owner member`);
 
-        // Add all webmasters as viewer members
         const viewerRole = roles.find((role) => role.name === "viewer");
-        const webmasters = await prisma.webmaster.findMany({
-          where: { userId: user.id },
+        const webmasterUsers = await prisma.user.findMany({
+          where: {
+            webmasterProfile: { isNot: null },
+            organizationId: organization.id,
+          },
         });
-        for (const webmaster of webmasters) {
-          // Try to find a user with the same email as the webmaster
-          const userForWebmaster = await prisma.user.findUnique({
-            where: { email: webmaster.email },
-          });
-          if (!userForWebmaster) {
-            // Optionally: create a user for this webmaster, or skip
-            continue;
-          }
-          // Check if already a member
+        for (const wmUser of webmasterUsers) {
           const existingMember = await prisma.organizationMember.findFirst({
             where: {
-              userId: userForWebmaster.id,
+              userId: wmUser.id,
               organizationId: organization.id,
             },
           });
           if (!existingMember) {
             await prisma.organizationMember.create({
               data: {
-                userId: userForWebmaster.id,
+                userId: wmUser.id,
                 organizationId: organization.id,
                 roleId: viewerRole.id,
                 status: "active",
               },
             });
-            console.log(`Added webmaster ${webmaster.email} as viewer member`);
+            console.log(`Added webmaster user ${wmUser.email} as viewer member`);
           }
         }
 
@@ -158,10 +151,6 @@ const migrateExistingUsersToOrganizations = async () => {
             data: { organizationId: organization.id },
           }),
           prisma.route.updateMany({
-            where: { userId: user.id },
-            data: { organizationId: organization.id },
-          }),
-          prisma.webmaster.updateMany({
             where: { userId: user.id },
             data: { organizationId: organization.id },
           }),
@@ -246,9 +235,6 @@ const rollbackMigration = async () => {
         data: { organizationId: null },
       }),
       prisma.route.updateMany({
-        data: { organizationId: null },
-      }),
-      prisma.webmaster.updateMany({
         data: { organizationId: null },
       }),
       prisma.payment.updateMany({

@@ -19,10 +19,8 @@ const addWebmaster = async (req, res) => {
       });
     }
 
-    const existingUser = await prismaClient.webmaster.findUnique({
-      where: {
-        email,
-      },
+    const existingUser = await prismaClient.user.findUnique({
+      where: { email },
     });
 
     if (existingUser) {
@@ -30,7 +28,6 @@ const addWebmaster = async (req, res) => {
       return;
     }
 
-    // Create Clerk user for the webmaster
     const response = await clerkClient.users.createUser({
       username: fullName.split(" ")[0] + Math.floor(Math.random() * 1000),
       emailAddress: [email],
@@ -40,75 +37,91 @@ const addWebmaster = async (req, res) => {
       deleteSelfEnabled: false,
     });
 
-    // Set role metadata in Clerk
     await clerkClient.users.updateUserMetadata(response.id, {
       privateMetadata: {
         role: "webmaster",
       },
     });
 
-    // Keep apiKey in sync across User and Webmaster tables.
-    const sharedApiKey = response.id;
+    const memberRole = await prismaClient.role.findFirst({
+      where: {
+        organizationId: ownerOrganization.id,
+        name: "viewer",
+      },
+    });
 
-    // Create a User record in DB using the Clerk user ID as the primary key.
-    // All controllers (chart, leads, etc.) look up users via prismaClient.user.findUnique({ where: { id: clerkUserId } }).
-    // Without this record the webmaster gets "User not found" on every authenticated request.
-    await prismaClient.user.create({
+    if (!memberRole) {
+      return res.status(500).json({
+        error: "Organization roles not initialized. Run organization setup first.",
+      });
+    }
+
+    const createdUser = await prismaClient.user.create({
       data: {
-        id: response.id, // Clerk user ID — must match what req.auth.userId returns on login
+        id: response.id,
         firstName: fullName.split(" ")[0],
         lastName: fullName.split(" ")[1] || "",
         email,
         password,
-        role: "webmaster",
-        apiKey: sharedApiKey,
+        apiKey: response.id,
         organizationId: ownerOrganization.id,
+        webmasterProfile: {
+          create: {
+            isActive: true,
+          },
+        },
+        organizationMemberships: {
+          create: {
+            organizationId: ownerOrganization.id,
+            roleId: memberRole.id,
+            status: "active",
+          },
+        },
+      },
+      include: {
+        webmasterProfile: true,
       },
     });
 
-    // Format campaign IDs for Prisma connection
     const campaignConnections = Array.isArray(campaigns)
       ? campaigns.map((campaignId) => ({
           id: campaignId,
         }))
       : [];
 
-    // Create webmaster with campaign connections
-    // userId here is the *owner/admin* who created this webmaster
-    const webmaster = await prismaClient.webmaster.create({
-      data: {
-        email,
-        firstName: fullName.split(" ")[0],
-        lastName: fullName.split(" ")[1] || "",
-        password,
-        userId, // The owner/admin user ID
-        apiKey: sharedApiKey, // Keep in sync with User.apiKey
-        organizationId: ownerOrganization.id,
-        // Connect to existing campaigns
-        campaigns: {
-          connect: campaignConnections,
+    if (campaignConnections.length) {
+      await prismaClient.campaign.updateMany({
+        where: {
+          id: { in: campaignConnections.map((c) => c.id) },
+          organizationId: ownerOrganization.id,
         },
-      },
-      // Include campaigns in the response
-      include: {
-        campaigns: true,
+        data: {
+          webmasterUserId: createdUser.id,
+        },
+      });
+    }
+
+    const assignedCampaigns = await prismaClient.campaign.findMany({
+      where: {
+        webmasterUserId: createdUser.id,
       },
     });
 
-    console.log("Webmaster created with campaigns:", webmaster.campaigns);
+    console.log("Webmaster created with campaigns:", assignedCampaigns);
 
     res.status(201).json({
       message: "Webmaster created",
       webmaster: {
-        id: webmaster.id,
-        email: webmaster.email,
-        name: `${webmaster.firstName} ${webmaster.lastName}`,
-        campaigns: webmaster.campaigns,
+        id: createdUser.id,
+        email: createdUser.email,
+        firstName: createdUser.firstName,
+        lastName: createdUser.lastName,
+        name: `${createdUser.firstName} ${createdUser.lastName}`,
+        campaigns: assignedCampaigns,
       },
     });
   } catch (error) {
     console.log("error", error);
-    // Extract Clerk-specific error messages when available
     if (error.clerkError && Array.isArray(error.errors) && error.errors.length > 0) {
       const clerkError = error.errors[0];
       return res.status(422).json({
@@ -121,19 +134,46 @@ const addWebmaster = async (req, res) => {
       .json({ error: "Unable to create webmaster", details: error.message });
   }
 };
+
 const getWebmastersByUser = async (req, res) => {
   try {
     const { userId } = req.auth;
-    const webmasters = await prismaClient.webmaster.findMany({
+    const ownerOrganization = await prismaClient.organization.findUnique({
+      where: { ownerId: userId },
+      select: { id: true },
+    });
+
+    if (!ownerOrganization?.id) {
+      return res.status(400).json({ error: "Owner organization not found" });
+    }
+
+    const webmasters = await prismaClient.user.findMany({
       where: {
-        userId,
+        webmasterProfile: { isNot: null },
+        organizationMemberships: {
+          some: {
+            organizationId: ownerOrganization.id,
+            status: "active",
+          },
+        },
       },
       include: {
-        campaigns: true,
+        webmasterProfile: true,
+        assignedWebmasterCampaigns: true,
       },
     });
-    console.log("Webmasters found:", webmasters);
-    res.status(200).json(webmasters);
+
+    const formatted = webmasters.map((w) => ({
+      id: w.id,
+      email: w.email,
+      firstName: w.firstName,
+      lastName: w.lastName,
+      isActive: w.webmasterProfile?.isActive ?? true,
+      campaigns: w.assignedWebmasterCampaigns,
+    }));
+
+    console.log("Webmasters found:", formatted);
+    res.status(200).json(formatted);
   } catch (error) {
     console.error("Error fetching webmasters:", error);
     res
@@ -146,56 +186,85 @@ const updateWebmaster = async (req, res) => {
   const { id } = req.params;
   const { campaigns, firstName, lastName, isActive } = req.body;
   try {
-    const currentWebmaster = await prismaClient.webmaster.findUnique({
-      where: { id },
-      include: { campaigns: true },
+    const { userId } = req.auth;
+    const ownerOrganization = await prismaClient.organization.findUnique({
+      where: { ownerId: userId },
+      select: { id: true },
     });
 
-    if (!currentWebmaster) {
+    const current = await prismaClient.user.findFirst({
+      where: {
+        id,
+        webmasterProfile: { isNot: null },
+        organizationMemberships: {
+          some: {
+            organizationId: ownerOrganization?.id,
+            status: "active",
+          },
+        },
+      },
+      include: {
+        webmasterProfile: true,
+        assignedWebmasterCampaigns: true,
+      },
+    });
+
+    if (!current || !ownerOrganization?.id) {
       return res.status(404).json({ error: "Webmaster not found" });
     }
 
     const newCampaignIds = Array.isArray(campaigns) ? campaigns : [];
 
-    const campaignsToConnect = newCampaignIds.filter(
-      (campaignId) =>
-        !currentWebmaster.campaigns.find((c) => c.id === campaignId)
-    );
+    await prismaClient.campaign.updateMany({
+      where: { webmasterUserId: id },
+      data: { webmasterUserId: null },
+    });
 
-    const campaignsToDisconnect = currentWebmaster.campaigns
-      .filter((campaign) => !newCampaignIds.includes(campaign.id))
-      .map((campaign) => campaign.id);
+    if (newCampaignIds.length) {
+      await prismaClient.campaign.updateMany({
+        where: {
+          id: { in: newCampaignIds },
+          organizationId: ownerOrganization.id,
+        },
+        data: { webmasterUserId: id },
+      });
+    }
 
-    const webmaster = await prismaClient.webmaster.update({
+    const updated = await prismaClient.user.update({
       where: { id },
       data: {
-        firstName,
-        lastName,
-        isActive,
-        campaigns: {
-          connect: campaignsToConnect.map((campaignId) => ({ id: campaignId })),
-          disconnect: campaignsToDisconnect.map((campaignId) => ({
-            id: campaignId,
-          })),
+        firstName: firstName ?? current.firstName,
+        lastName: lastName ?? current.lastName,
+        webmasterProfile: {
+          update: {
+            isActive:
+              typeof isActive === "boolean"
+                ? isActive
+                : current.webmasterProfile?.isActive ?? true,
+          },
         },
       },
       include: {
-        campaigns: true,
+        webmasterProfile: true,
+        assignedWebmasterCampaigns: true,
       },
     });
 
-    // update clerk user
-    // the API key is the clerk user id
     if (isActive === false) {
-      const clerkUser = await clerkClient.users.lockUser(webmaster.apiKey);
-      console.log("clerkUser", clerkUser);
-    } else {
-      const clerkUser = await clerkClient.users.unlockUser(webmaster.apiKey);
-      console.log("clerkUser", clerkUser);
+      await clerkClient.users.lockUser(updated.id);
+    } else if (isActive === true) {
+      await clerkClient.users.unlockUser(updated.id);
     }
 
-    console.log("webmaster updated", webmaster);
-    res.status(200).json(webmaster);
+    console.log("webmaster updated", updated);
+    res.status(200).json({
+      id: updated.id,
+      email: updated.email,
+      firstName: updated.firstName,
+      lastName: updated.lastName,
+      isActive: updated.webmasterProfile?.isActive ?? true,
+      campaigns: updated.assignedWebmasterCampaigns,
+    });
   } catch (error) {
     console.log("error", error);
     res
@@ -207,25 +276,40 @@ const updateWebmaster = async (req, res) => {
 const deleteWebmaster = async (req, res) => {
   const { id } = req.params;
   try {
-    const currentWebmaster = await prismaClient.webmaster.findUnique({
-      where: { id },
+    const { userId } = req.auth;
+    const ownerOrganization = await prismaClient.organization.findUnique({
+      where: { ownerId: userId },
+      select: { id: true },
     });
 
-    if (!currentWebmaster) {
+    const current = await prismaClient.user.findFirst({
+      where: {
+        id,
+        webmasterProfile: { isNot: null },
+        organizationMemberships: {
+          some: {
+            organizationId: ownerOrganization?.id,
+            status: "active",
+          },
+        },
+      },
+    });
+
+    if (!current || !ownerOrganization?.id) {
       res.status(404).json({ error: "Webmaster not found" });
       return;
     }
 
-    await prismaClient.webmaster.delete({
+    await prismaClient.campaign.updateMany({
+      where: { webmasterUserId: id },
+      data: { webmasterUserId: null },
+    });
+
+    await prismaClient.user.delete({
       where: { id },
     });
 
-    // Also delete the corresponding User record (its id = the Clerk user ID stored in apiKey)
-    await prismaClient.user.deleteMany({
-      where: { id: currentWebmaster.apiKey },
-    });
-
-    await clerkClient.users.deleteUser(currentWebmaster.apiKey);
+    await clerkClient.users.deleteUser(id);
 
     res.status(200).json({ message: "Webmaster deleted" });
   } catch (error) {

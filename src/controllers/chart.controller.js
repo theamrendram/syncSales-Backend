@@ -18,37 +18,24 @@ const getChartData = async (req, res) => {
 
     const user = await prismaClient.user.findUnique({
       where: { id: userId },
-      select: { role: true, organizationId: true, email: true },
+      select: {
+        organizationId: true,
+        webmasterProfile: { select: { userId: true } },
+      },
     });
 
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Setup the where clause based on user role
     let where = {};
 
-    if (user.role === "admin") {
-      if (!user.organizationId) {
-        return res
-          .status(400)
-          .json({ error: "Organization ID not found for admin" });
-      }
-      where = {
-        user: { organizationId: user.organizationId },
-        createdAt: { gte: startDate },
-      };
-    } else if (user.role === "webmaster") {
-      const webmaster = await prismaClient.webmaster.findUnique({
-        where: { email: user.email },
-        select: { campaigns: { select: { id: true } } },
+    if (user.webmasterProfile) {
+      const assignedCampaigns = await prismaClient.campaign.findMany({
+        where: { webmasterUserId: userId },
+        select: { id: true },
       });
-
-      if (!webmaster) {
-        return res.status(404).json({ error: "Webmaster not found" });
-      }
-
-      const campaignIds = webmaster.campaigns.map((c) => c.id);
+      const campaignIds = assignedCampaigns.map((c) => c.id);
       if (!campaignIds.length) {
         return res.json({
           newChartData: [],
@@ -66,8 +53,13 @@ const getChartData = async (req, res) => {
         campaignId: { in: campaignIds },
         createdAt: { gte: startDate },
       };
+    } else if (user.organizationId) {
+      where = {
+        user: { organizationId: user.organizationId },
+        createdAt: { gte: startDate },
+      };
     } else {
-      return res.status(403).json({ error: "Unauthorized role" });
+      return res.status(403).json({ error: "Unauthorized" });
     }
 
     const leads = await prismaClient.lead.findMany({
@@ -110,37 +102,24 @@ const getMetricData = async (req, res) => {
 
     const user = await prismaClient.user.findUnique({
       where: { id: userId },
-      select: { role: true, organizationId: true, email: true },
+      select: {
+        organizationId: true,
+        webmasterProfile: { select: { userId: true } },
+      },
     });
 
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Setup the where clause based on user role
     let where = {};
 
-    if (user.role === "admin") {
-      if (!user.organizationId) {
-        return res
-          .status(400)
-          .json({ error: "Organization ID not found for admin" });
-      }
-      where = {
-        user: { organizationId: user.organizationId },
-        createdAt: { gte: startDate },
-      };
-    } else if (user.role === "webmaster") {
-      const webmaster = await prismaClient.webmaster.findUnique({
-        where: { email: user.email },
-        select: { campaigns: { select: { id: true } } },
+    if (user.webmasterProfile) {
+      const assignedCampaigns = await prismaClient.campaign.findMany({
+        where: { webmasterUserId: userId },
+        select: { id: true },
       });
-
-      if (!webmaster) {
-        return res.status(404).json({ error: "Webmaster not found" });
-      }
-
-      const campaignIds = webmaster.campaigns.map((c) => c.id);
+      const campaignIds = assignedCampaigns.map((c) => c.id);
       if (!campaignIds.length) {
         return res.json({
           todaysLeads: 0,
@@ -158,8 +137,13 @@ const getMetricData = async (req, res) => {
         campaignId: { in: campaignIds },
         createdAt: { gte: startDate },
       };
+    } else if (user.organizationId) {
+      where = {
+        user: { organizationId: user.organizationId },
+        createdAt: { gte: startDate },
+      };
     } else {
-      return res.status(403).json({ error: "Unauthorized role" });
+      return res.status(403).json({ error: "Unauthorized" });
     }
 
     const leads = await prismaClient.lead.findMany({

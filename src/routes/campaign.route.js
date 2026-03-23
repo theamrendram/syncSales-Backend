@@ -1,18 +1,16 @@
 const {
   getCampaigns,
   getCampaignById,
-  getCampaignsByUser,
   addCampaign,
   editCampaign,
-  deleteCampaign
+  deleteCampaign,
 } = require("../controllers/campaign.controller.js");
 const router = require("express").Router();
 
-router.get("/all", getCampaigns);
-router.get("/user/:userId", getCampaignsByUser);
+router.get("/", getCampaigns);
 router.get("/:id", getCampaignById);
 router.post("/", addCampaign);
-router.put("/edit/:id", editCampaign);
+router.put("/:id", editCampaign);
 router.delete("/:id", deleteCampaign);
 
 module.exports = router;

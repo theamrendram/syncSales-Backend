@@ -3,19 +3,16 @@ const {
   editRoute,
   getRoutes,
   getRouteById,
-  getRouteByUser,
   deleteRouteById,
 } = require("../controllers/route.controller.js");
 const express = require("express");
 
-// Use express.Router() instead of router()
-const route = express.Router();
+const router = express.Router();
 
-route.post("/", addRoute);
-route.get("/", getRoutes);
-route.get("/:id", getRouteById);
-route.delete("/:id", deleteRouteById);
-route.put("/edit/:id", editRoute);
-route.get("/user/:userId", getRouteByUser);
+router.post("/", addRoute);
+router.get("/", getRoutes);
+router.get("/:id", getRouteById);
+router.put("/:id", editRoute);
+router.delete("/:id", deleteRouteById);
 
-module.exports = route;
+module.exports = router;

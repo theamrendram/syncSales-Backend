@@ -41,6 +41,9 @@ const roleRoute = require("./routes/role.route");
 const chartRoute = require("./routes/chart.route");
 const clerkWebhookRoute = require("./routes/clerk-webhook.route");
 const { addUser } = require("./controllers/user.controller");
+const {
+  resolveActiveOrganization,
+} = require("./middlewares/organization-context.middleware");
 
 // clerk webhook route -> do not protect this route or move it to the end of the middleware chain
 app.use("/api/v1/clerk-webhook", clerkWebhookRoute);
@@ -56,7 +59,7 @@ app.use(
       if (res.statusCode >= 400) return "warn";
       return "info";
     },
-  })
+  }),
 );
 app.use(express.json({ limit: config.requestLimit }));
 app.use(cors());
@@ -78,10 +81,15 @@ app.get("/unauthenticated", (req, res) => {
 app.use("/api/v1/user/create", addUser);
 app.use(clerkMiddleware());
 app.use("/api/v1/user", requireAuth(), userRoute);
-app.use("/api/v1/route", requireAuth(), routeRoute);
+app.use("/api/v1/routes", requireAuth(), resolveActiveOrganization, routeRoute);
 app.use("/api/v1/webhook", requireAuth(), webhookRoute);
 app.use("/api/v1/seller", requireAuth(), sellerRoute);
-app.use("/api/v1/campaign", requireAuth(), campaignRoute);
+app.use(
+  "/api/v1/campaigns",
+  requireAuth(),
+  resolveActiveOrganization,
+  campaignRoute,
+);
 app.use("/api/v1/webmaster", requireAuth(), webmasterRoute);
 app.use("/api/v1/lead", requireAuth(), leadsRoute);
 app.use("/api/v1/chart", requireAuth(), chartRoute);

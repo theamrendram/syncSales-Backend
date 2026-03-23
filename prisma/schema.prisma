@@ -14,14 +14,13 @@ model User {
   email                   String               @unique
   password                String?
   companyName             String?
-  role                    String               @default("admin")
-  apiKey                  String               @unique @default("0")
+  apiKey                  String               @unique
   createdAt               DateTime             @default(now())
   updatedAt               DateTime             @updatedAt
   address                 String?
   phone                   String?
-  organizationId          String?              
-  campaigns               Campaign[]
+  organizationId          String?
+  ownedCampaigns          Campaign[]           @relation("CampaignOwner")
   leads                   Lead[]
   ownedOrganization       Organization?        @relation("Owner")
   organizationMemberships OrganizationMember[]
@@ -29,29 +28,43 @@ model User {
   routes                  Route[]
   subscription            Subscription[]
   userPlan                UserPlan?            @relation("UserToUserPlan")
-  webmaster               Webmaster[]
+  webmasterProfile        WebmasterProfile?
+  assignedWebmasterCampaigns Campaign[]        @relation("CampaignWebmaster")
+  resourceAccess          AccessControl[]
+}
+
+model WebmasterProfile {
+  userId    String   @id
+  isActive  Boolean  @default(true)
+  leadLimit Int?
+  payout    Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([isActive])
 }
 
 model Organization {
-  id            String               @id @default(uuid())
-  name          String
-  ownerId       String               @unique
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
-  description   String?
-  domain        String?
-  logo          String?
-  campaigns     Campaign[]
-  leads         Lead[]
-  owner         User                 @relation("Owner", fields: [ownerId], references: [id])
-  members       OrganizationMember[]
-  payments      Payment[]
-  Role          Role[]
-  routes        Route[]
-  subscriptions Subscription[]
-  userPlans     UserPlan[]
-  webmasters       Webmaster[]
-  orgLeadCounter   OrgLeadCounter?
+  id             String               @id @default(uuid())
+  name           String
+  ownerId        String               @unique
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  description    String?
+  domain         String?
+  logo           String?
+  campaigns      Campaign[]
+  leads          Lead[]
+  owner          User                 @relation("Owner", fields: [ownerId], references: [id])
+  members        OrganizationMember[]
+  payments       Payment[]
+  Role           Role[]
+  routes         Route[]
+  subscriptions  Subscription[]
+  userPlans      UserPlan[]
+  orgLeadCounter OrgLeadCounter?
+  resourceAccess AccessControl[]
 
   @@index([ownerId])
 }
@@ -117,25 +130,6 @@ model UserPlan {
   @@index([organizationId])
 }
 
-model Webmaster {
-  id             String        @id @default(uuid())
-  firstName      String
-  lastName       String
-  email          String        @unique
-  password       String?
-  apiKey         String        @unique
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  userId         String
-  organizationId String?
-  isActive       Boolean       @default(true)
-  campaigns      Campaign[]
-  organization   Organization? @relation(fields: [organizationId], references: [id])
-  user           User          @relation(fields: [userId], references: [id])
-
-  @@index([organizationId])
-}
-
 model Route {
   id             String        @id @default(uuid())
   userId         String
@@ -151,40 +145,69 @@ model Route {
   updatedAt      DateTime      @updatedAt
   hasWebhook     Boolean       @default(true)
   deletedAt      DateTime?
-  organizationId String?
+  organizationId String
   campaigns      Campaign[]
   Lead           Lead[]
-  organization   Organization? @relation(fields: [organizationId], references: [id])
+  organization   Organization  @relation(fields: [organizationId], references: [id])
   user           User          @relation(fields: [userId], references: [id])
+  resourceAccess AccessControl[]
 
   @@index([organizationId])
+  @@index([userId])
+  @@index([organizationId, userId])
 }
 
 model Campaign {
-  id             String        @id @default(uuid())
-  name           String
-  userId         String
-  routeId        String
-  campId         String
-  status         Status        @default(active)
-  manager        String
-  isArchived     Boolean       @default(false)
-  createdAt      DateTime      @default(now())
-  lead_period    Int           @default(90)
-  updatedAt      DateTime      @updatedAt
-  webmasterId    String?
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id])
-  route          Route         @relation(fields: [routeId], references: [id])
-  user           User          @relation(fields: [userId], references: [id])
-  webmaster      Webmaster?    @relation(fields: [webmasterId], references: [id])
-  Lead           Lead[]
+  id               String        @id @default(uuid())
+  name             String
+  userId           String
+  routeId          String
+  campId           String
+  status           Status        @default(active)
+  manager          String
+  isArchived       Boolean       @default(false)
+  createdAt        DateTime      @default(now())
+  lead_period      Int           @default(90)
+  updatedAt        DateTime      @updatedAt
+  webmasterUserId  String?
+  organizationId   String
+  organization     Organization  @relation(fields: [organizationId], references: [id])
+  route            Route         @relation(fields: [routeId], references: [id])
+  owner            User          @relation("CampaignOwner", fields: [userId], references: [id])
+  webmasterUser    User?         @relation("CampaignWebmaster", fields: [webmasterUserId], references: [id])
+  Lead             Lead[]
+  resourceAccess   AccessControl[]
 
   @@index([campId])
   @@index([status])
   @@index([userId])
   @@index([routeId])
   @@index([organizationId])
+  @@index([webmasterUserId])
+  @@index([organizationId, routeId])
+}
+
+model AccessControl {
+  id             String       @id @default(uuid())
+  userId         String
+  organizationId String
+  routeId        String?
+  campaignId     String?
+  accessType     AccessType   @default(view)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  route          Route?       @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  campaign       Campaign?    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, routeId])
+  @@unique([userId, campaignId])
+  @@unique([userId, routeId, campaignId])
+  @@index([organizationId])
+  @@index([userId, organizationId])
+  @@index([userId, organizationId, routeId])
+  @@index([userId, organizationId, campaignId])
 }
 
 model Lead {
@@ -210,9 +233,9 @@ model Lead {
   country         String?
   webhookResponse Json?
   companyId       String?
-  organizationId  String?
+  organizationId  String
   campaign        Campaign?     @relation(fields: [campaignId], references: [id])
-  organization    Organization? @relation(fields: [organizationId], references: [id])
+  organization    Organization  @relation(fields: [organizationId], references: [id])
   route           Route         @relation(fields: [routeId], references: [id])
   user            User          @relation(fields: [userId], references: [id])
 
@@ -225,6 +248,7 @@ model Lead {
   @@index([phone])
   @@index([companyId])
   @@index([organizationId])
+  @@index([organizationId, userId])
 }
 
 model LeadUsage {
@@ -279,6 +303,10 @@ model Subscription {
   @@index([razorpaySubscriptionId])
   @@index([status])
   @@index([organizationId])
+}
+
+enum AccessType {
+  view
 }
 
 enum SubscriptionStatus {

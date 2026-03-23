@@ -1,41 +1,106 @@
 const prismaClient = require("../utils/prismaClient");
 const logger = require("../utils/logger");
 
+const ROUTE_MUTABLE_FIELDS = [
+  "name",
+  "product",
+  "description",
+  "payout",
+  "url",
+  "method",
+  "attributes",
+];
+
+const buildRoutePayload = (body) => {
+  const payload = {
+    name: body.name,
+    product: body.product,
+    description: body.description,
+    payout: body.payout,
+    url: body.url,
+    method: body.method,
+    attributes: body.attributes,
+  };
+  payload.hasWebhook = Boolean(payload.url);
+  return payload;
+};
+
+const getMissingRequiredFields = (body) =>
+  ROUTE_MUTABLE_FIELDS.filter((field) => body[field] === undefined);
+
 const getRoutes = async (req, res) => {
-  const take = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
-  const routes = await prismaClient.route.findMany({
-    where: { deletedAt: null },
-    orderBy: { createdAt: "desc" },
-    take,
-  });
-  res.json({ data: routes, limit: take });
+  try {
+    const take = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+    const where = {
+      organizationId: req.organizationId,
+      // deletedAt: null,
+    };
+
+    // Keep support for ?userId=... query shape while deriving filter from auth.
+    if (req.query.userId !== undefined) {
+      where.userId = req.auth.userId;
+    }
+
+    if (req.query.name) {
+      where.name = { contains: String(req.query.name), mode: "insensitive" };
+    }
+
+    if (req.query.product) {
+      where.product = { contains: String(req.query.product), mode: "insensitive" };
+    }
+
+    if (req.query.hasWebhook !== undefined) {
+      if (req.query.hasWebhook !== "true" && req.query.hasWebhook !== "false") {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid hasWebhook filter. Use true or false.",
+        });
+      }
+      where.hasWebhook = req.query.hasWebhook === "true";
+    }
+
+    const routes = await prismaClient.route.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take,
+    });
+
+    console.log("[getRoutes] routes: ", routes)
+    return res.status(200).json({
+      success: true,
+      data: routes,
+      meta: { limit: take },
+    });
+  } catch (error) {
+    logger.error({ err: error }, "Unable to get routes");
+    return res.status(500).json({
+      success: false,
+      error: "Unable to get routes",
+      details: error.message,
+    });
+  }
 };
 
 const addRoute = async (req, res) => {
-  const {
-    name,
-    userId,
-    product,
-    description,
-    payout,
-    url,
-    method,
-    attributes,
-  } = req.body;
   try {
+    const missingFields = getMissingRequiredFields(req.body);
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        details: `Required fields: ${missingFields.join(", ")}`,
+      });
+    }
+
+    const payload = buildRoutePayload(req.body);
     const route = await prismaClient.route.create({
       data: {
-        name: name, // Ensure this is provided
-        product: product, // Ensure this is provided
-        payout: payout, // Ensure this is provided
-        description: description, // Ensure this is provided
-        hasWebhook: url ? true : false,
-        url: url, // Ensure this is provided
-        method: method, // Ensure this is provided
-        attributes: attributes, // Ensure this is provided, should be in JSON format
-        userId: userId, // Ensure this is provided
+        ...payload,
+        userId: req.auth.userId,
+        organizationId: req.organizationId,
       },
     });
+
     return res.status(201).json({ success: true, data: route });
   } catch (error) {
     logger.error({ err: error }, "Unable to create route");
@@ -49,72 +114,62 @@ const addRoute = async (req, res) => {
 
 const getRouteById = async (req, res) => {
   const { id } = req.params;
+  console.log("[getRouteById] id: ", id)
   try {
-    const route = await prismaClient.route.findUnique({
+    const route = await prismaClient.route.findFirst({
       where: {
         id,
+        organizationId: req.organizationId,
       },
     });
-    res.json(route);
+    if (!route) {
+      return res.status(404).json({ success: false, error: "Route not found" });
+    }
+
+    return res.status(200).json({ success: true, data: route });
   } catch (error) {
-    res
-      .status(400)
-      .json({ error: "Unable to get route", details: error.message });
+    logger.error({ err: error }, "Unable to get route");
+    return res.status(500).json({
+      success: false,
+      error: "Unable to get route",
+      details: error.message,
+    });
   }
 };
 
 const editRoute = async (req, res) => {
   const { id } = req.params;
-  const {
-    name,
-    userId,
-    product,
-    description,
-    payout,
-    url,
-    method,
-    attributes,
-  } = req.body;
   try {
-    const route = await prismaClient.route.update({
-      where: {
-        id,
-      },
-      data: {
-        name: name,
-        product: product,
-        payout: payout,
-        description: description,
-        url: url,
-        method: method,
-        attributes: attributes,
-        userId: userId,
-      },
+    const missingFields = getMissingRequiredFields(req.body);
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields for PUT update",
+        details: `Required fields: ${missingFields.join(", ")}`,
+      });
+    }
+
+    const existing = await prismaClient.route.findFirst({
+      where: { id, organizationId: req.organizationId, deletedAt: null },
     });
-    res.json(route);
+    if (!existing) {
+      return res.status(404).json({ success: false, error: "Route not found" });
+    }
+
+    const payload = buildRoutePayload(req.body);
+    const route = await prismaClient.route.update({
+      where: { id },
+      data: payload,
+    });
+
+    return res.status(200).json({ success: true, data: route });
   } catch (error) {
     logger.error({ err: error }, "Unable to update route");
-    res
-      .status(400)
-      .json({ error: "Unable to update route", details: error.message });
-  }
-};
-
-const getRouteByUser = async (req, res) => {
-  const { userId } = req.params;
-  try {
-    const routes = await prismaClient.route.findMany({
-      where: {
-        AND: [{ userId }, { deletedAt: null }],
-      },
-      orderBy: { createdAt: "desc" },
-      take: 500,
+    return res.status(500).json({
+      success: false,
+      error: "Unable to update route",
+      details: error.message,
     });
-    res.json(routes);
-  } catch (error) {
-    res
-      .status(400)
-      .json({ error: "Unable to get routes", details: error.message });
   }
 };
 
@@ -122,6 +177,13 @@ const deleteRouteById = async (req, res) => {
   const { id } = req.params;
 
   try {
+    const existing = await prismaClient.route.findFirst({
+      where: { id, organizationId: req.organizationId, deletedAt: null },
+    });
+    if (!existing) {
+      return res.status(404).json({ success: false, error: "Route not found" });
+    }
+
     const response = await prismaClient.route.update({
       where: { id },
       data: {
@@ -130,9 +192,8 @@ const deleteRouteById = async (req, res) => {
     });
 
     return res.status(200).json({
-      message: "Route deleted successfully",
       success: true,
-      data: response.id,
+      data: { id: response.id },
     });
   } catch (error) {
     logger.error({ err: error }, "Error deleting route");
@@ -148,6 +209,5 @@ module.exports = {
   editRoute,
   getRoutes,
   getRouteById,
-  getRouteByUser,
   deleteRouteById,
 };

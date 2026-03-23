@@ -108,10 +108,11 @@ const checkDataAccess = async (userId, dataId, dataType, organizationId) => {
         });
         break;
       case "webmaster":
-        data = await prisma.webmaster.findFirst({
+        data = await prisma.user.findFirst({
           where: {
             id: dataId,
             organizationId,
+            webmasterProfile: { isNot: null },
           },
         });
         break;
@@ -156,7 +157,9 @@ const getOrganizationStats = async (organizationId) => {
       prisma.lead.count({ where: { organizationId } }),
       prisma.campaign.count({ where: { organizationId } }),
       prisma.route.count({ where: { organizationId } }),
-      prisma.webmaster.count({ where: { organizationId } }),
+      prisma.user.count({
+        where: { organizationId, webmasterProfile: { isNot: null } },
+      }),
       prisma.organizationMember.count({
         where: {
           organizationId,
@@ -197,8 +200,8 @@ const migrateDataToOrganization = async (userId, organizationId) => {
         where: { userId },
         data: { organizationId },
       }),
-      prisma.webmaster.updateMany({
-        where: { userId },
+      prisma.user.updateMany({
+        where: { id: userId },
         data: { organizationId },
       }),
       prisma.payment.updateMany({

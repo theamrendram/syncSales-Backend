@@ -8,7 +8,6 @@ const addUser = async (req, res) => {
     email,
     password = "",
     companyName,
-    role,
   } = req.body;
 
   console.log("req.body", req.body);
@@ -47,7 +46,6 @@ const addUser = async (req, res) => {
         email,
         password,
         companyName,
-        role: role || "user",
         apiKey:
           Math.random().toString(36).substring(2, 15) +
           Math.random().toString(36).substring(2, 15),

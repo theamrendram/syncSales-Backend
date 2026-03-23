@@ -44,9 +44,6 @@ async function cleanupOrganizations() {
       prisma.route.updateMany({
         data: { organizationId: null },
       }),
-      prisma.webmaster.updateMany({
-        data: { organizationId: null },
-      }),
       prisma.payment.updateMany({
         data: { organizationId: null },
       }),
