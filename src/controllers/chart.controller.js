@@ -20,7 +20,7 @@ const getChartData = async (req, res) => {
       where: { id: userId },
       select: {
         organizationId: true,
-        webmasterProfile: { select: { userId: true } },
+        WebmasterProfile: { select: { userId: true } },
       },
     });
 
@@ -30,7 +30,7 @@ const getChartData = async (req, res) => {
 
     let where = {};
 
-    if (user.webmasterProfile) {
+    if (user.WebmasterProfile) {
       const assignedCampaigns = await prismaClient.campaign.findMany({
         where: { webmasterUserId: userId },
         select: { id: true },
@@ -104,7 +104,7 @@ const getMetricData = async (req, res) => {
       where: { id: userId },
       select: {
         organizationId: true,
-        webmasterProfile: { select: { userId: true } },
+        WebmasterProfile: { select: { userId: true } },
       },
     });
 
@@ -114,7 +114,7 @@ const getMetricData = async (req, res) => {
 
     let where = {};
 
-    if (user.webmasterProfile) {
+    if (user.WebmasterProfile) {
       const assignedCampaigns = await prismaClient.campaign.findMany({
         where: { webmasterUserId: userId },
         select: { id: true },

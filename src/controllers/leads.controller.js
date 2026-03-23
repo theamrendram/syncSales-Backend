@@ -17,6 +17,72 @@ const leadModelHasOrgLeadId = !!prismaClient?._runtimeDataModel?.models?.Lead?.f
   (field) => field.name === "orgLeadId"
 );
 
+const leadListSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  phone: true,
+  email: true,
+  status: true,
+  userId: true,
+  date: true,
+  routeId: true,
+  campaignId: true,
+  webhookResponse: true,
+  createdAt: true,
+  updatedAt: true,
+  organizationId: true,
+  campaign: { select: { id: true, name: true } },
+  route: { select: { payout: true, name: true } },
+};
+
+const getUserWithMemberships = async (userId) =>
+  prismaClient.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      email: true,
+      WebmasterProfile: { select: { userId: true } },
+      organizationMemberships: {
+        where: { status: "active" },
+        select: {
+          organizationId: true,
+          role: { select: { name: true, permissions: true } },
+        },
+      },
+    },
+  });
+
+const getLeadAccessWhereForUser = async (user, organizationId) => {
+  if (user.WebmasterProfile) {
+    const assignedCampaigns = await prismaClient.campaign.findMany({
+      where: { webmasterUserId: user.id },
+      select: { id: true },
+    });
+    const campaignIds = assignedCampaigns.map((c) => c.id);
+    if (!campaignIds.length) {
+      return { where: null, isEmpty: true };
+    }
+    return { where: { campaignId: { in: campaignIds } }, isEmpty: false };
+  }
+
+  if (organizationId) {
+    const membership = user.organizationMemberships.find(
+      (m) => m.organizationId === organizationId
+    );
+    if (!membership) {
+      return { where: null, isForbidden: true };
+    }
+    return { where: { organizationId }, isEmpty: false };
+  }
+
+  const userOrgIds = user.organizationMemberships.map((m) => m.organizationId);
+  if (!userOrgIds.length) {
+    return { where: null, isEmpty: true };
+  }
+  return { where: { organizationId: { in: userOrgIds } }, isEmpty: false };
+};
+
 
 const getLeads = async (req, res) => {
   try {
@@ -122,7 +188,7 @@ const addLead = async (req, res) => {
       where: { apiKey },
       select: {
         id: true,
-        webmasterProfile: {
+        WebmasterProfile: {
           select: { isActive: true },
         },
         organizationMemberships: {
@@ -184,8 +250,8 @@ const addLead = async (req, res) => {
       return res.status(400).json({ error: "Invalid campaign ID" });
     }
 
-    if (userWithCampaign.webmasterProfile) {
-      if (!userWithCampaign.webmasterProfile.isActive) {
+    if (userWithCampaign.WebmasterProfile) {
+      if (!userWithCampaign.WebmasterProfile.isActive) {
         return res.status(403).json({ error: "Webmaster account is inactive" });
       }
       if (!userWithCampaign.assignedWebmasterCampaigns[0]) {
@@ -314,60 +380,24 @@ const addLead = async (req, res) => {
 const getLeadsByUser = async (req, res) => {
   try {
     const { userId } = req.auth;
-      const { organizationId } = req.query;
+    const { organizationId } = req.query;
 
     if (!userId) {
       return res.status(400).json({ error: "User ID not found" });
     }
 
-    const user = await prismaClient.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        webmasterProfile: { select: { userId: true } },
-        organizationMemberships: {
-          where: { status: "active" },
-          select: {
-            organizationId: true,
-            role: { select: { name: true, permissions: true } },
-          },
-        },
-      },
-    });
+    const user = await getUserWithMemberships(userId);
 
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    let where = {};
-
-    if (user.webmasterProfile) {
-      const assignedCampaigns = await prismaClient.campaign.findMany({
-        where: { webmasterUserId: user.id },
-        select: { id: true },
+    const access = await getLeadAccessWhereForUser(user, organizationId);
+    if (access.isForbidden) {
+      return res.status(403).json({
+        error: "Access denied. You are not a member of this organization.",
       });
-      const campaignIds = assignedCampaigns.map((c) => c.id);
-      if (!campaignIds.length) return res.json([]);
-      where = { campaignId: { in: campaignIds } };
-    } else {
-      // Admin / member path — filter by organization membership
-      if (organizationId) {
-        const membership = user.organizationMemberships.find(
-          (m) => m.organizationId === organizationId
-        );
-        if (!membership) {
-          return res.status(403).json({
-            error: "Access denied. You are not a member of this organization.",
-          });
-        }
-        where.organizationId = organizationId;
-      } else {
-        const userOrgIds = user.organizationMemberships.map((m) => m.organizationId);
-        if (userOrgIds.length > 0) {
-          where.organizationId = { in: userOrgIds };
-        } else {
-          return res.json([]);
-        }
-      }
+    }
+    if (access.isEmpty) {
+      return res.json([]);
     }
 
     const exportLimit = Math.min(
@@ -375,14 +405,8 @@ const getLeadsByUser = async (req, res) => {
       MAX_EXPORT_LIMIT
     );
     const leads = await prismaClient.lead.findMany({
-      where,
-      select: {
-        id: true, firstName: true, lastName: true, phone: true, email: true,
-        status: true, userId: true, date: true, routeId: true, campaignId: true,
-        webhookResponse: true, createdAt: true, updatedAt: true, organizationId: true,
-        campaign: { select: { id: true, name: true } },
-        route: { select: { payout: true, name: true } },
-      },
+      where: access.where,
+      select: leadListSelect,
       orderBy: { createdAt: "desc" },
       take: exportLimit,
     });
@@ -409,57 +433,20 @@ const getLeadsByUserPagination = async (req, res) => {
     const { userId } = req.auth;
     if (!userId) return res.status(400).json({ error: "User ID not found" });
 
-    const user = await prismaClient.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        webmasterProfile: { select: { userId: true } },
-        organizationMemberships: {
-          where: { status: "active" },
-          select: {
-            organizationId: true,
-            role: { select: { name: true, permissions: true } },
-          },
-        },
-      },
-    });
+    const user = await getUserWithMemberships(userId);
 
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    let where = {};
-
-    if (user.webmasterProfile) {
-      const assignedCampaigns = await prismaClient.campaign.findMany({
-        where: { webmasterUserId: user.id },
-        select: { id: true },
+    const access = await getLeadAccessWhereForUser(user, organizationId);
+    if (access.isForbidden) {
+      return res.status(403).json({
+        error: "Access denied. You are not a member of this organization.",
       });
-      const campaignIds = assignedCampaigns.map((c) => c.id);
-      if (!campaignIds.length) {
-        return res.json({ data: [], total: 0, page: pageNumber, totalPages: 0 });
-      }
-      where = { campaignId: { in: campaignIds } };
-    } else {
-      // Admin / member path — filter by organization membership
-      if (organizationId) {
-        const membership = user.organizationMemberships.find(
-          (m) => m.organizationId === organizationId
-        );
-        if (!membership) {
-          return res.status(403).json({
-            error: "Access denied. You are not a member of this organization.",
-          });
-        }
-        where.organizationId = organizationId;
-      } else {
-        const userOrgIds = user.organizationMemberships.map((m) => m.organizationId);
-        if (userOrgIds.length > 0) {
-          where.organizationId = { in: userOrgIds };
-        } else {
-          return res.json({ data: [], total: 0, page: pageNumber, totalPages: 0 });
-        }
-      }
     }
+    if (access.isEmpty) {
+      return res.json({ data: [], total: 0, page: pageNumber, totalPages: 0 });
+    }
+    const where = { ...access.where };
 
     // Search filter
     if (search) {
@@ -480,13 +467,7 @@ const getLeadsByUserPagination = async (req, res) => {
 
     const leads = await prismaClient.lead.findMany({
       where,
-      select: {
-        id: true, firstName: true, lastName: true, phone: true, email: true,
-        status: true, userId: true, date: true, routeId: true, campaignId: true,
-        webhookResponse: true, createdAt: true, updatedAt: true, organizationId: true,
-        campaign: { select: { id: true, name: true } },
-        route: { select: { payout: true, name: true } },
-      },
+      select: leadListSelect,
       orderBy: { createdAt: "desc" },
       skip,
       take,
@@ -512,7 +493,7 @@ const getMonthlyLeadsByUser = async (req, res) => {
       where: { id: userId },
       select: {
         organizationId: true,
-        webmasterProfile: { select: { userId: true } },
+        WebmasterProfile: { select: { userId: true } },
       },
     });
 
@@ -525,7 +506,7 @@ const getMonthlyLeadsByUser = async (req, res) => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(now.getDate() - 30);
 
-    if (user.webmasterProfile) {
+    if (user.WebmasterProfile) {
       const assignedCampaigns = await prismaClient.campaign.findMany({
         where: { webmasterUserId: userId },
         select: { id: true },
@@ -613,7 +594,7 @@ const getPastTenDaysLeadsByUser = async (req, res) => {
       where: { id: userId },
       select: {
         organizationId: true,
-        webmasterProfile: { select: { userId: true } },
+        WebmasterProfile: { select: { userId: true } },
       },
     });
 
@@ -627,7 +608,7 @@ const getPastTenDaysLeadsByUser = async (req, res) => {
     tenDaysAgo.setDate(now.getDate() - 10);
     const nowTime = new Date();
 
-    if (user.webmasterProfile) {
+    if (user.WebmasterProfile) {
       const assignedCampaigns = await prismaClient.campaign.findMany({
         where: { webmasterUserId: userId },
         select: { id: true },
