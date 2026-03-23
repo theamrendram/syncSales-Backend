@@ -1,14 +1,27 @@
 const prismaClient = require("../utils/prismaClient");
 const { generateKey } = require("../utils/generate-key");
 const { clerkClient } = require("@clerk/express");
+
+const userSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  companyName: true,
+  apiKey: true,
+  createdAt: true,
+  updatedAt: true,
+  address: true,
+  phone: true,
+  organizationId: true,
+};
+
+const userApiKeySelect = {
+  id: true,
+  apiKey: true,
+};
 const addUser = async (req, res) => {
-  const {
-    firstName,
-    lastName,
-    email,
-    password = "",
-    companyName,
-  } = req.body;
+  const { firstName, lastName, email, password = "", companyName } = req.body;
 
   console.log("req.body", req.body);
   if (!firstName || !lastName || !email || !password) {
@@ -93,6 +106,7 @@ const addUserAPI = async (req, res) => {
       where: {
         id: userId,
       },
+      select: userApiKeySelect,
     });
     if (!user) {
       return res.status(400).json({ error: "User not found" });
@@ -109,6 +123,7 @@ const addUserAPI = async (req, res) => {
       data: {
         apiKey: generateKey(),
       },
+      select: userApiKeySelect,
     });
     return res.status(200).json({ apiKey: updatedUser.apiKey });
   } catch (error) {
@@ -124,6 +139,7 @@ const getUserAPI = async (req, res) => {
       where: {
         id: userId,
       },
+      select: userSelect,
     });
     console.log(user);
     return res.status(200).json({ data: user });
@@ -142,6 +158,7 @@ const getUser = async (req, res) => {
       where: {
         id: userId,
       },
+      select: userSelect,
     });
     return res.status(200).json({ data: user });
   } catch (error) {

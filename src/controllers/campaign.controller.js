@@ -24,6 +24,34 @@ const buildCampaignPayload = (body, userId, organizationId) => {
   };
 };
 
+const campaignSelect = {
+  id: true,
+  name: true,
+  userId: true,
+  routeId: true,
+  campId: true,
+  status: true,
+  manager: true,
+  createdAt: true,
+  lead_period: true,
+  updatedAt: true,
+  organizationId: true,
+  isArchived: true,
+  route: {
+    select: {
+      id: true,
+      name: true,
+      product: true,
+      method: true,
+      url: true,
+      payout: true,
+      hasWebhook: true,
+      organizationId: true,
+      deletedAt: true,
+    },
+  },
+};
+
 const getCampaigns = async (req, res) => {
   try {
     const take = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
@@ -40,9 +68,7 @@ const getCampaigns = async (req, res) => {
 
     const campaigns = await prismaClient.campaign.findMany({
       where,
-      include: {
-        route: true,
-      },
+      select: campaignSelect,
       orderBy: { createdAt: "desc" },
       take,
     });
@@ -70,13 +96,13 @@ const getCampaignById = async (req, res) => {
         organizationId: req.organizationId,
         isArchived: false,
       },
-      include: {
-        route: true,
-      },
+      select: campaignSelect,
     });
 
     if (!campaign) {
-      return res.status(404).json({ success: false, error: "Campaign not found" });
+      return res
+        .status(404)
+        .json({ success: false, error: "Campaign not found" });
     }
 
     return res.status(200).json({ success: true, data: campaign });
@@ -111,7 +137,11 @@ const addCampaign = async (req, res) => {
     }
 
     const route = await prismaClient.route.findFirst({
-      where: { id: routeId, organizationId: req.organizationId, deletedAt: null },
+      where: {
+        id: routeId,
+        organizationId: req.organizationId,
+        deletedAt: null,
+      },
       select: { organizationId: true },
     });
 
@@ -145,7 +175,9 @@ const editCampaign = async (req, res) => {
       where: { id, organizationId: req.organizationId, isArchived: false },
     });
     if (!existing) {
-      return res.status(404).json({ success: false, error: "Campaign not found" });
+      return res
+        .status(404)
+        .json({ success: false, error: "Campaign not found" });
     }
 
     const missingFields = getMissingRequiredFields(req.body);
@@ -168,7 +200,11 @@ const editCampaign = async (req, res) => {
     }
 
     const route = await prismaClient.route.findFirst({
-      where: { id: routeId, organizationId: req.organizationId, deletedAt: null },
+      where: {
+        id: routeId,
+        organizationId: req.organizationId,
+        deletedAt: null,
+      },
       select: { organizationId: true },
     });
     if (!route) {
@@ -202,7 +238,9 @@ const deleteCampaign = async (req, res) => {
       where: { id, organizationId: req.organizationId, isArchived: false },
     });
     if (!existing) {
-      return res.status(404).json({ success: false, error: "Campaign not found" });
+      return res
+        .status(404)
+        .json({ success: false, error: "Campaign not found" });
     }
 
     const campaign = await prismaClient.campaign.update({

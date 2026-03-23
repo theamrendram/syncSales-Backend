@@ -32,7 +32,7 @@ const addWebmaster = async (req, res) => {
 
   try {
     const ownerOrganization = await getOwnerOrganization(userId);
-    console.log("[addWebmaster] ownerOrganization: ", ownerOrganization)
+    console.log("[addWebmaster] ownerOrganization: ", ownerOrganization);
     if (!ownerOrganization?.id) {
       return res.status(400).json({
         error:
@@ -48,7 +48,7 @@ const addWebmaster = async (req, res) => {
       return res.status(400).json({ error: "User already exists" });
     }
 
-    console.log("[addWebmaster] existingUser: ", existingUser)
+    console.log("[addWebmaster] existingUser: ", existingUser);
 
     const [firstName, ...rest] = String(fullName).trim().split(" ");
     const lastName = rest.join(" ") || "";
