@@ -13,7 +13,7 @@ const formatWebmaster = (w) => ({
   email: w.email,
   firstName: w.firstName,
   lastName: w.lastName,
-  isActive: w.webmasterProfile?.isActive ?? true,
+  isActive: w.WebmasterProfile?.isActive ?? true,
   campaigns: w.assignedWebmasterCampaigns,
 });
 
@@ -91,7 +91,7 @@ const addWebmaster = async (req, res) => {
         password,
         apiKey: response.id,
         organizationId: ownerOrganization.id,
-        webmasterProfile: {
+        WebmasterProfile: {
           create: {
             isActive: true,
           },
@@ -105,7 +105,7 @@ const addWebmaster = async (req, res) => {
         },
       },
       include: {
-        webmasterProfile: true,
+        WebmasterProfile: true,
       },
     });
 
@@ -174,7 +174,7 @@ const getWebmasters = async (req, res) => {
 
     const webmasters = await prismaClient.user.findMany({
       where: {
-        webmasterProfile: { isNot: null },
+        WebmasterProfile: { isNot: null },
         organizationMemberships: {
           some: {
             organizationId: ownerOrganization.id,
@@ -183,7 +183,7 @@ const getWebmasters = async (req, res) => {
         },
       },
       include: {
-        webmasterProfile: true,
+        WebmasterProfile: true,
         assignedWebmasterCampaigns: true,
       },
     });
@@ -208,7 +208,7 @@ const getWebmasterById = async (req, res) => {
     const current = await prismaClient.user.findFirst({
       where: {
         id,
-        webmasterProfile: { isNot: null },
+        WebmasterProfile: { isNot: null },
         organizationMemberships: {
           some: {
             organizationId: ownerOrganization.id,
@@ -217,7 +217,7 @@ const getWebmasterById = async (req, res) => {
         },
       },
       include: {
-        webmasterProfile: true,
+        WebmasterProfile: true,
         assignedWebmasterCampaigns: true,
       },
     });
@@ -244,7 +244,7 @@ const updateWebmaster = async (req, res) => {
     const current = await prismaClient.user.findFirst({
       where: {
         id,
-        webmasterProfile: { isNot: null },
+        WebmasterProfile: { isNot: null },
         organizationMemberships: {
           some: {
             organizationId: ownerOrganization?.id,
@@ -253,7 +253,7 @@ const updateWebmaster = async (req, res) => {
         },
       },
       include: {
-        webmasterProfile: true,
+        WebmasterProfile: true,
         assignedWebmasterCampaigns: true,
       },
     });
@@ -284,17 +284,17 @@ const updateWebmaster = async (req, res) => {
       data: {
         firstName: firstName ?? current.firstName,
         lastName: lastName ?? current.lastName,
-        webmasterProfile: {
+        WebmasterProfile: {
           update: {
             isActive:
               typeof isActive === "boolean"
                 ? isActive
-                : (current.webmasterProfile?.isActive ?? true),
+                : (current.WebmasterProfile?.isActive ?? true),
           },
         },
       },
       include: {
-        webmasterProfile: true,
+        WebmasterProfile: true,
         assignedWebmasterCampaigns: true,
       },
     });
@@ -322,7 +322,7 @@ const deleteWebmaster = async (req, res) => {
     const current = await prismaClient.user.findFirst({
       where: {
         id,
-        webmasterProfile: { isNot: null },
+        WebmasterProfile: { isNot: null },
         organizationMemberships: {
           some: {
             organizationId: ownerOrganization?.id,

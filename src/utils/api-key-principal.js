@@ -15,7 +15,7 @@ const resolveApiKeyPrincipal = async (apiKey) => {
     select: {
       id: true,
       organizationId: true,
-      webmasterProfile: {
+      WebmasterProfile: {
         select: {
           isActive: true,
         },
@@ -28,7 +28,7 @@ const resolveApiKeyPrincipal = async (apiKey) => {
     return null;
   }
 
-  if (user.webmasterProfile) {
+  if (user.WebmasterProfile) {
     let planUserId = user.id;
     if (user.organizationId) {
       const org = await prismaClient.organization.findUnique({
@@ -46,7 +46,7 @@ const resolveApiKeyPrincipal = async (apiKey) => {
       actorUserId: user.id,
       planUserId,
       organizationId: user.organizationId || null,
-      isActive: user.webmasterProfile.isActive,
+      isActive: user.WebmasterProfile.isActive,
     };
   }
 

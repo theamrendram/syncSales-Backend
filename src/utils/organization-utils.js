@@ -112,7 +112,7 @@ const checkDataAccess = async (userId, dataId, dataType, organizationId) => {
           where: {
             id: dataId,
             organizationId,
-            webmasterProfile: { isNot: null },
+            WebmasterProfile: { isNot: null },
           },
         });
         break;
@@ -158,7 +158,7 @@ const getOrganizationStats = async (organizationId) => {
       prisma.campaign.count({ where: { organizationId } }),
       prisma.route.count({ where: { organizationId } }),
       prisma.user.count({
-        where: { organizationId, webmasterProfile: { isNot: null } },
+        where: { organizationId, WebmasterProfile: { isNot: null } },
       }),
       prisma.organizationMember.count({
         where: {

@@ -116,7 +116,7 @@ const migrateExistingUsersToOrganizations = async () => {
         const viewerRole = roles.find((role) => role.name === "viewer");
         const webmasterUsers = await prisma.user.findMany({
           where: {
-            webmasterProfile: { isNot: null },
+            WebmasterProfile: { isNot: null },
             organizationId: organization.id,
           },
         });
