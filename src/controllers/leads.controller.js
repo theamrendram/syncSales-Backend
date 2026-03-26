@@ -558,6 +558,7 @@ const getMonthlyLeadsByUser = async (req, res) => {
         sub2: true,
         sub3: true,
         sub4: true,
+        ip: true,
         campaign: {
           select: {
             id: true,
