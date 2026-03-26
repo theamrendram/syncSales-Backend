@@ -4,7 +4,13 @@ const prisma = require("../utils/prismaClient");
 const requireOrganizationMembership = async (req, res, next) => {
   try {
     const { organizationId } = req.params;
-    const userId = req.user.id;
+    const userId = req.auth?.userId;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
     if (!organizationId) {
       return res.status(400).json({
@@ -72,7 +78,13 @@ const requirePermission = (permission) => {
 const requireOrganizationOwner = async (req, res, next) => {
   try {
     const { organizationId } = req.params;
-    const userId = req.user.id;
+    const userId = req.auth?.userId;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
     const organization = await prisma.organization.findUnique({
       where: { id: organizationId },

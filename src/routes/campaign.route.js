@@ -6,11 +6,14 @@ const {
   deleteCampaign,
 } = require("../controllers/campaign.controller.js");
 const router = require("express").Router();
+const {
+  requireOrgPermission,
+} = require("../middlewares/authentication-context.middleware");
 
-router.get("/", getCampaigns);
-router.get("/:id", getCampaignById);
-router.post("/", addCampaign);
-router.put("/:id", editCampaign);
-router.delete("/:id", deleteCampaign);
+router.get("/", requireOrgPermission("canViewAllData"), getCampaigns);
+router.get("/:id", requireOrgPermission("canViewAllData"), getCampaignById);
+router.post("/", requireOrgPermission("canEditAllData"), addCampaign);
+router.put("/:id", requireOrgPermission("canEditAllData"), editCampaign);
+router.delete("/:id", requireOrgPermission("canDeleteData"), deleteCampaign);
 
 module.exports = router;

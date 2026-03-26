@@ -12,27 +12,19 @@ const getChartData = async (req, res) => {
     const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 90);
     const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const { userId } = req.auth;
+    const ctx = req.authContext;
     if (!userId) {
       return res.status(400).json({ error: "User ID not found" });
     }
 
-    const user = await prismaClient.user.findUnique({
-      where: { id: userId },
-      select: {
-        organizationId: true,
-        WebmasterProfile: { select: { userId: true } },
-      },
-    });
-
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
     let where = {};
 
-    if (user.WebmasterProfile) {
+    if (ctx?.isWebmaster) {
       const assignedCampaigns = await prismaClient.campaign.findMany({
-        where: { webmasterUserId: userId },
+        where: {
+          webmasterUserId: userId,
+          organizationId: ctx.organizationId,
+        },
         select: { id: true },
       });
       const campaignIds = assignedCampaigns.map((c) => c.id);
@@ -50,12 +42,13 @@ const getChartData = async (req, res) => {
       }
 
       where = {
+        organizationId: ctx.organizationId,
         campaignId: { in: campaignIds },
         createdAt: { gte: startDate },
       };
-    } else if (user.organizationId) {
+    } else if (ctx?.organizationId) {
       where = {
-        user: { organizationId: user.organizationId },
+        organizationId: ctx.organizationId,
         createdAt: { gte: startDate },
       };
     } else {
@@ -96,27 +89,19 @@ const getMetricData = async (req, res) => {
     const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 90);
     const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const { userId } = req.auth;
+    const ctx = req.authContext;
     if (!userId) {
       return res.status(400).json({ error: "User ID not found" });
     }
 
-    const user = await prismaClient.user.findUnique({
-      where: { id: userId },
-      select: {
-        organizationId: true,
-        WebmasterProfile: { select: { userId: true } },
-      },
-    });
-
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
     let where = {};
 
-    if (user.WebmasterProfile) {
+    if (ctx?.isWebmaster) {
       const assignedCampaigns = await prismaClient.campaign.findMany({
-        where: { webmasterUserId: userId },
+        where: {
+          webmasterUserId: userId,
+          organizationId: ctx.organizationId,
+        },
         select: { id: true },
       });
       const campaignIds = assignedCampaigns.map((c) => c.id);
@@ -134,12 +119,13 @@ const getMetricData = async (req, res) => {
       }
 
       where = {
+        organizationId: ctx.organizationId,
         campaignId: { in: campaignIds },
         createdAt: { gte: startDate },
       };
-    } else if (user.organizationId) {
+    } else if (ctx?.organizationId) {
       where = {
-        user: { organizationId: user.organizationId },
+        organizationId: ctx.organizationId,
         createdAt: { gte: startDate },
       };
     } else {

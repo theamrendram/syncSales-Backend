@@ -23,7 +23,7 @@ async function check() {
   const sharonUser = await prisma.user.findUnique({
     where: { email: sharonEmail },
     include: {
-      WebmasterProfile: true,
+      webmasterProfile: true,
       assignedWebmasterCampaigns: true,
     },
   });

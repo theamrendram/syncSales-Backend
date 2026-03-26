@@ -1,40 +1,52 @@
 const prisma = require("../utils/prismaClient");
+const { parseRolePermissions } = require("../utils/role-permissions-schema");
+
+function assertRoleRouteContext(req, organizationId) {
+  return (
+    req.authContext &&
+    req.authContext.organizationId === organizationId &&
+    req.auth?.userId
+  );
+}
+
+function handlePermissionsParseError(res, err) {
+  if (err?.name === "ZodError") {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid permissions payload",
+      issues: err.issues,
+    });
+  }
+  throw err;
+}
 
 // Create a new role
 const createRole = async (req, res) => {
   try {
     const { organizationId } = req.params;
     const { name, description, permissions } = req.body;
-    const userId = req.user.id;
 
-    // Check if user has permission to manage roles
-    const membership = await prisma.organizationMember.findFirst({
-      where: {
-        userId,
-        organizationId,
-        status: "active",
-      },
-      include: {
-        role: true,
-      },
-    });
-
-    if (!membership) {
+    if (!assertRoleRouteContext(req, organizationId)) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You are not a member of this organization.",
       });
     }
 
-    const userPermissions = membership.role.permissions;
-    if (!userPermissions.canManageRoles) {
+    if (!req.authContext.permissions?.canManageRoles) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You do not have permission to manage roles.",
       });
     }
 
-    // Check if role name already exists in organization
+    let validatedPermissions;
+    try {
+      validatedPermissions = parseRolePermissions(permissions);
+    } catch (err) {
+      return handlePermissionsParseError(res, err);
+    }
+
     const existingRole = await prisma.role.findFirst({
       where: {
         name,
@@ -53,7 +65,7 @@ const createRole = async (req, res) => {
       data: {
         name,
         description,
-        permissions,
+        permissions: validatedPermissions,
         organizationId,
       },
     });
@@ -77,18 +89,8 @@ const createRole = async (req, res) => {
 const getRoles = async (req, res) => {
   try {
     const { organizationId } = req.params;
-    const userId = req.user.id;
 
-    // Check if user is member of the organization
-    const membership = await prisma.organizationMember.findFirst({
-      where: {
-        userId,
-        organizationId,
-        status: "active",
-      },
-    });
-
-    if (!membership) {
+    if (!assertRoleRouteContext(req, organizationId)) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You are not a member of this organization.",
@@ -132,36 +134,21 @@ const updateRole = async (req, res) => {
   try {
     const { organizationId, roleId } = req.params;
     const { name, description, permissions } = req.body;
-    const userId = req.user.id;
 
-    // Check if user has permission to manage roles
-    const membership = await prisma.organizationMember.findFirst({
-      where: {
-        userId,
-        organizationId,
-        status: "active",
-      },
-      include: {
-        role: true,
-      },
-    });
-
-    if (!membership) {
+    if (!assertRoleRouteContext(req, organizationId)) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You are not a member of this organization.",
       });
     }
 
-    const userPermissions = membership.role.permissions;
-    if (!userPermissions.canManageRoles) {
+    if (!req.authContext.permissions?.canManageRoles) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You do not have permission to manage roles.",
       });
     }
 
-    // Check if role exists and belongs to organization
     const existingRole = await prisma.role.findFirst({
       where: {
         id: roleId,
@@ -176,7 +163,6 @@ const updateRole = async (req, res) => {
       });
     }
 
-    // Prevent updating owner role
     if (existingRole.name === "owner") {
       return res.status(400).json({
         success: false,
@@ -184,7 +170,6 @@ const updateRole = async (req, res) => {
       });
     }
 
-    // Check if new name conflicts with existing role
     if (name && name !== existingRole.name) {
       const nameConflict = await prisma.role.findFirst({
         where: {
@@ -202,13 +187,33 @@ const updateRole = async (req, res) => {
       }
     }
 
+    let validatedPermissions;
+    if (permissions !== undefined) {
+      try {
+        validatedPermissions = parseRolePermissions(permissions);
+      } catch (err) {
+        return handlePermissionsParseError(res, err);
+      }
+    }
+
+    const data = {
+      ...(name !== undefined && { name }),
+      ...(description !== undefined && { description }),
+      ...(validatedPermissions !== undefined && {
+        permissions: validatedPermissions,
+      }),
+    };
+
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid fields to update",
+      });
+    }
+
     const role = await prisma.role.update({
       where: { id: roleId },
-      data: {
-        name,
-        description,
-        permissions,
-      },
+      data,
     });
 
     res.json({
@@ -230,36 +235,21 @@ const updateRole = async (req, res) => {
 const deleteRole = async (req, res) => {
   try {
     const { organizationId, roleId } = req.params;
-    const userId = req.user.id;
 
-    // Check if user has permission to manage roles
-    const membership = await prisma.organizationMember.findFirst({
-      where: {
-        userId,
-        organizationId,
-        status: "active",
-      },
-      include: {
-        role: true,
-      },
-    });
-
-    if (!membership) {
+    if (!assertRoleRouteContext(req, organizationId)) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You are not a member of this organization.",
       });
     }
 
-    const userPermissions = membership.role.permissions;
-    if (!userPermissions.canManageRoles) {
+    if (!req.authContext.permissions?.canManageRoles) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You do not have permission to manage roles.",
       });
     }
 
-    // Check if role exists and belongs to organization
     const existingRole = await prisma.role.findFirst({
       where: {
         id: roleId,
@@ -277,7 +267,6 @@ const deleteRole = async (req, res) => {
       });
     }
 
-    // Prevent deleting owner role
     if (existingRole.name === "owner") {
       return res.status(400).json({
         success: false,
@@ -285,7 +274,6 @@ const deleteRole = async (req, res) => {
       });
     }
 
-    // Check if role has members
     if (existingRole.members.length > 0) {
       return res.status(400).json({
         success: false,
@@ -317,36 +305,21 @@ const updateMemberRole = async (req, res) => {
   try {
     const { organizationId, memberId } = req.params;
     const { roleId } = req.body;
-    const userId = req.user.id;
 
-    // Check if user has permission to manage members
-    const membership = await prisma.organizationMember.findFirst({
-      where: {
-        userId,
-        organizationId,
-        status: "active",
-      },
-      include: {
-        role: true,
-      },
-    });
-
-    if (!membership) {
+    if (!assertRoleRouteContext(req, organizationId)) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You are not a member of this organization.",
       });
     }
 
-    const userPermissions = membership.role.permissions;
-    if (!userPermissions.canManageMembers) {
+    if (!req.authContext.permissions?.canManageMembers) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You do not have permission to manage members.",
       });
     }
 
-    // Check if member exists
     const member = await prisma.organizationMember.findFirst({
       where: {
         id: memberId,
@@ -361,7 +334,6 @@ const updateMemberRole = async (req, res) => {
       });
     }
 
-    // Check if new role exists and belongs to organization
     const newRole = await prisma.role.findFirst({
       where: {
         id: roleId,
@@ -376,10 +348,16 @@ const updateMemberRole = async (req, res) => {
       });
     }
 
-    // Prevent changing owner's role
     const organization = await prisma.organization.findUnique({
       where: { id: organizationId },
     });
+
+    if (!organization) {
+      return res.status(404).json({
+        success: false,
+        message: "Organization not found",
+      });
+    }
 
     if (organization.ownerId === member.userId) {
       return res.status(400).json({

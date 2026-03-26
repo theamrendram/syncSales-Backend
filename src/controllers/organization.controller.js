@@ -141,21 +141,10 @@ const createOrganization = async (req, res) => {
 const getOrganization = async (req, res) => {
   try {
     const { organizationId } = req.params;
-    const userId = req.auth.userId;
-
-    // Check if user is member of the organization
-    const membership = await prisma.organizationMember.findFirst({
-      where: {
-        userId,
-        organizationId,
-        status: "active",
-      },
-      include: {
-        role: true,
-      },
-    });
-
-    if (!membership) {
+    if (
+      !req.authContext ||
+      req.authContext.organizationId !== organizationId
+    ) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You are not a member of this organization.",
@@ -201,7 +190,7 @@ const getOrganization = async (req, res) => {
       success: true,
       data: {
         organization,
-        userRole: membership.role,
+        userRole: req.authContext.role,
       },
     });
   } catch (error) {
@@ -219,29 +208,19 @@ const updateOrganization = async (req, res) => {
   try {
     const { organizationId } = req.params;
     const { name, description, domain, logo } = req.body;
-    const userId = req.auth.userId;
 
-    // Check if user is owner or has permission to manage organization
-    const membership = await prisma.organizationMember.findFirst({
-      where: {
-        userId,
-        organizationId,
-        status: "active",
-      },
-      include: {
-        role: true,
-      },
-    });
-
-    if (!membership) {
+    if (
+      !req.authContext ||
+      req.authContext.organizationId !== organizationId
+    ) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You are not a member of this organization.",
       });
     }
 
-    const permissions = membership.role.permissions;
-    if (!permissions.canManageOrganization) {
+    const permissions = req.authContext.permissions;
+    if (!permissions?.canManageOrganization) {
       return res.status(403).json({
         success: false,
         message:
@@ -289,29 +268,19 @@ const addMember = async (req, res) => {
   try {
     const { organizationId } = req.params;
     const { email, roleId } = req.body;
-    const userId = req.auth.userId;
 
-    // Check if user has permission to manage members
-    const membership = await prisma.organizationMember.findFirst({
-      where: {
-        userId,
-        organizationId,
-        status: "active",
-      },
-      include: {
-        role: true,
-      },
-    });
-
-    if (!membership) {
+    if (
+      !req.authContext ||
+      req.authContext.organizationId !== organizationId
+    ) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You are not a member of this organization.",
       });
     }
 
-    const permissions = membership.role.permissions;
-    if (!permissions.canManageMembers) {
+    const permissions = req.authContext.permissions;
+    if (!permissions?.canManageMembers) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You do not have permission to manage members.",
@@ -400,41 +369,48 @@ const addMember = async (req, res) => {
 const removeMember = async (req, res) => {
   try {
     const { organizationId, memberId } = req.params;
-    const userId = req.auth.userId;
 
-    // Check if user has permission to manage members
-    const membership = await prisma.organizationMember.findFirst({
-      where: {
-        userId,
-        organizationId,
-        status: "active",
-      },
-      include: {
-        role: true,
-      },
-    });
-
-    if (!membership) {
+    if (
+      !req.authContext ||
+      req.authContext.organizationId !== organizationId
+    ) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You are not a member of this organization.",
       });
     }
 
-    const permissions = membership.role.permissions;
-    if (!permissions.canManageMembers) {
+    const permissions = req.authContext.permissions;
+    if (!permissions?.canManageMembers) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You do not have permission to manage members.",
       });
     }
 
-    // Check if trying to remove owner
+    const member = await prisma.organizationMember.findFirst({
+      where: { id: memberId, organizationId },
+    });
+
+    if (!member) {
+      return res.status(404).json({
+        success: false,
+        message: "Member not found",
+      });
+    }
+
     const organization = await prisma.organization.findUnique({
       where: { id: organizationId },
     });
 
-    if (organization.ownerId === memberId) {
+    if (!organization) {
+      return res.status(404).json({
+        success: false,
+        message: "Organization not found",
+      });
+    }
+
+    if (organization.ownerId === member.userId) {
       return res.status(400).json({
         success: false,
         message: "Cannot remove organization owner",
@@ -464,18 +440,11 @@ const removeMember = async (req, res) => {
 const getMembers = async (req, res) => {
   try {
     const { organizationId } = req.params;
-    const userId = req.auth.userId;
 
-    // Check if user is member of the organization
-    const membership = await prisma.organizationMember.findFirst({
-      where: {
-        userId,
-        organizationId,
-        status: "active",
-      },
-    });
-
-    if (!membership) {
+    if (
+      !req.authContext ||
+      req.authContext.organizationId !== organizationId
+    ) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You are not a member of this organization.",

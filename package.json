@@ -34,7 +34,8 @@
     "pino-http": "^11.0.0",
     "razorpay": "^2.9.5",
     "svix": "^1.76.1",
-    "uuid": "^10.0.0"
+    "uuid": "^10.0.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/jest": "^29.5.8",
