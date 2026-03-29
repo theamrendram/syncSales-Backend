@@ -18,8 +18,24 @@ const addWebhook = async (req, res) => {
 };
 
 const getWebhooks = async (req, res) => {
-  const webhooks = await prismaClient.webhook.findMany();
-  res.json(webhooks);
+  const { userId } = req.auth;
+  const ownerOrganization = await getOwnerOrganization(userId);
+  if (!ownerOrganization?.id) {
+    return res.status(400).json({ error: "Owner organization not found" });
+  } 
+  const webmasters = await prismaClient.user.findMany({
+    where: {
+      organizationMemberships: {
+        some: {
+          organizationId: ownerOrganization.id,
+        },
+      },
+    },
+    include: {
+      WebmasterProfile: true,
+    },
+  });
+  res.json(webmasters);
 };
 
 module.exports = { addWebhook, getWebhooks };

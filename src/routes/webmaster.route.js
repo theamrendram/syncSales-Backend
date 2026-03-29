@@ -1,10 +1,17 @@
-const {addWebmaster, getWebmastersByUser, updateWebmaster, deleteWebmaster} = require('../controllers/webmaster.controller');
+const {
+  addWebmaster,
+  getWebmasters,
+  getWebmasterById,
+  updateWebmaster,
+  deleteWebmaster,
+} = require("../controllers/webmaster.controller");
 
-const router = require('express').Router();
+const router = require("express").Router();
 
-router.post('/', addWebmaster);
-router.get('/', getWebmastersByUser);
-router.put('/:id', updateWebmaster);
-router.delete('/:id', deleteWebmaster);
+router.post("/", addWebmaster);
+router.get("/", getWebmasters);
+router.get("/:id", getWebmasterById);
+router.put("/:id", updateWebmaster);
+router.delete("/:id", deleteWebmaster);
 
-module.exports = router
+module.exports = router;

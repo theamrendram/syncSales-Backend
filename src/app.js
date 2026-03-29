@@ -26,21 +26,26 @@ if (trustProxySetting === undefined) {
 }
 
 // Routes
-const routeRoute = require("./routes/route.route");
-const userRoute = require("./routes/user.route");
-const webhookRoute = require("./routes/webhook.route");
-const sellerRoute = require("./routes/seller.route");
 const campaignRoute = require("./routes/campaign.route");
-const leadsRoute = require("./routes/leads.route");
-const leadsApiRoute = require("./routes/leads-api.route");
-const postbackRoute = require("./routes/postback.route");
-const webmasterRoute = require("./routes/webmaster.route");
-const subscriptionRoute = require("./routes/subscription.route");
-const organizationRoute = require("./routes/organization.route");
-const roleRoute = require("./routes/role.route");
 const chartRoute = require("./routes/chart.route");
 const clerkWebhookRoute = require("./routes/clerk-webhook.route");
+const leadsApiRoute = require("./routes/leads-api.route");
+const leadsRoute = require("./routes/leads.route");
+const organizationRoute = require("./routes/organization.route");
+const postbackRoute = require("./routes/postback.route");
+const roleRoute = require("./routes/role.route");
+const routeRoute = require("./routes/route.route");
+const sellerRoute = require("./routes/seller.route");
+const subscriptionRoute = require("./routes/subscription.route");
+const userRoute = require("./routes/user.route");
+const webhookRoute = require("./routes/webhook.route");
+const webmasterRoute = require("./routes/webmaster.route");
 const { addUser } = require("./controllers/user.controller");
+const {
+  authenticationContext,
+} = require("./middlewares/authentication-context.middleware");
+
+const organizationContextStrict = authenticationContext();
 
 // clerk webhook route -> do not protect this route or move it to the end of the middleware chain
 app.use("/api/v1/clerk-webhook", clerkWebhookRoute);
@@ -56,7 +61,7 @@ app.use(
       if (res.statusCode >= 400) return "warn";
       return "info";
     },
-  })
+  }),
 );
 app.use(express.json({ limit: config.requestLimit }));
 app.use(cors());
@@ -78,16 +83,31 @@ app.get("/unauthenticated", (req, res) => {
 app.use("/api/v1/user/create", addUser);
 app.use(clerkMiddleware());
 app.use("/api/v1/user", requireAuth(), userRoute);
-app.use("/api/v1/route", requireAuth(), routeRoute);
+app.use(
+  "/api/v1/routes",
+  requireAuth(),
+  organizationContextStrict,
+  routeRoute,
+);
 app.use("/api/v1/webhook", requireAuth(), webhookRoute);
 app.use("/api/v1/seller", requireAuth(), sellerRoute);
-app.use("/api/v1/campaign", requireAuth(), campaignRoute);
+app.use(
+  "/api/v1/campaigns",
+  requireAuth(),
+  organizationContextStrict,
+  campaignRoute,
+);
 app.use("/api/v1/webmaster", requireAuth(), webmasterRoute);
-app.use("/api/v1/lead", requireAuth(), leadsRoute);
-app.use("/api/v1/chart", requireAuth(), chartRoute);
+app.use("/api/v1/lead", requireAuth(), organizationContextStrict, leadsRoute);
+app.use(
+  "/api/v1/chart",
+  requireAuth(),
+  organizationContextStrict,
+  chartRoute,
+);
 // Organization and role routes
-app.use("/api/v1/org", requireAuth(), organizationRoute);
-app.use("/api/v1/org/role", requireAuth(), roleRoute);
+app.use("/api/v1/org", requireAuth(), organizationContextStrict, organizationRoute);
+app.use("/api/v1/org/role", requireAuth(), organizationContextStrict, roleRoute);
 
 // test route for webhook
 app.post("/webhook", (req, res) => {

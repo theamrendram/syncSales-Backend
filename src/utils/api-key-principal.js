@@ -15,69 +15,48 @@ const resolveApiKeyPrincipal = async (apiKey) => {
     select: {
       id: true,
       organizationId: true,
+      webmasterProfile: {
+        select: {
+          isActive: true,
+        },
+      },
     },
   });
 
   console.log("[resolveApiKeyPrincipal] user", user);
-  if (user) {
-    const linkedWebmaster = await prismaClient.webmaster.findUnique({
-      where: { apiKey: normalizedApiKey },
-      select: {
-        id: true,
-        userId: true,
-        organizationId: true,
-        isActive: true,
-      },
-    });
-
-    console.log("[resolveApiKeyPrincipal] linkedWebmaster", linkedWebmaster);
-    if (linkedWebmaster) {
-      return {
-        type: "webmaster",
-        apiKey: normalizedApiKey,
-        webmasterId: linkedWebmaster.id,
-        actorUserId: user.id,
-        planUserId: linkedWebmaster.userId,
-        organizationId:
-          linkedWebmaster.organizationId || user.organizationId || null,
-        isActive: linkedWebmaster.isActive,
-      };
-    }
-
-    return {
-      type: "user",
-      apiKey: normalizedApiKey,
-      actorUserId: user.id,
-      planUserId: user.id,
-      organizationId: user.organizationId || null,
-      isActive: true,
-    };
-  }
-
-  const webmaster = await prismaClient.webmaster.findUnique({
-    where: { apiKey: normalizedApiKey },
-    select: {
-      id: true,
-      userId: true,
-      apiKey: true,
-      organizationId: true,
-      isActive: true,
-    },
-  });
-
-  console.log("[resolveApiKeyPrincipal] webmaster", webmaster);
-  if (!webmaster) {
+  if (!user) {
     return null;
   }
 
+  if (user.webmasterProfile) {
+    let planUserId = user.id;
+    if (user.organizationId) {
+      const org = await prismaClient.organization.findUnique({
+        where: { id: user.organizationId },
+        select: { ownerId: true },
+      });
+      if (org?.ownerId) {
+        planUserId = org.ownerId;
+      }
+    }
+
+    return {
+      type: "webmaster",
+      apiKey: normalizedApiKey,
+      actorUserId: user.id,
+      planUserId,
+      organizationId: user.organizationId || null,
+      isActive: user.webmasterProfile.isActive,
+    };
+  }
+
   return {
-    type: "webmaster",
+    type: "user",
     apiKey: normalizedApiKey,
-    webmasterId: webmaster.id,
-    actorUserId: webmaster.apiKey,
-    planUserId: webmaster.userId,
-    organizationId: webmaster.organizationId || null,
-    isActive: webmaster.isActive,
+    actorUserId: user.id,
+    planUserId: user.id,
+    organizationId: user.organizationId || null,
+    isActive: true,
   };
 };
 

@@ -8,7 +8,6 @@ const {
   transformLeadsToChartData,
   getLeadsGroupedByDateRouteCampaign,
 } = require("../utils/chart-functions");
-const { addOrganizationFilter } = require("../utils/organization-utils");
 const logger = require("../utils/logger");
 
 const MAX_PAGE_LIMIT = 100;
@@ -17,9 +16,86 @@ const leadModelHasOrgLeadId = !!prismaClient?._runtimeDataModel?.models?.Lead?.f
   (field) => field.name === "orgLeadId"
 );
 
+const leadListSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  phone: true,
+  email: true,
+  status: true,
+  userId: true,
+  date: true,
+  routeId: true,
+  campaignId: true,
+  webhookResponse: true,
+  createdAt: true,
+  updatedAt: true,
+  organizationId: true,
+  campaign: { select: { id: true, name: true } },
+  route: { select: { payout: true, name: true } },
+};
+
+const getUserWithMemberships = async (userId) =>
+  prismaClient.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      email: true,
+      webmasterProfile: { select: { userId: true } },
+      organizationMemberships: {
+        where: { status: "active" },
+        select: {
+          organizationId: true,
+          role: { select: { name: true, permissions: true } },
+        },
+      },
+    },
+  });
+
+const getLeadAccessWhereForUser = async (user, organizationId) => {
+  if (user.webmasterProfile) {
+    if (!organizationId) {
+      return { where: null, isForbidden: true };
+    }
+    const assignedCampaigns = await prismaClient.campaign.findMany({
+      where: { webmasterUserId: user.id, organizationId },
+      select: { id: true },
+    });
+    const campaignIds = assignedCampaigns.map((c) => c.id);
+    if (!campaignIds.length) {
+      return { where: null, isEmpty: true };
+    }
+    return {
+      where: { organizationId, campaignId: { in: campaignIds } },
+      isEmpty: false,
+    };
+  }
+
+  if (organizationId) {
+    const membership = user.organizationMemberships.find(
+      (m) => m.organizationId === organizationId
+    );
+    if (!membership) {
+      return { where: null, isForbidden: true };
+    }
+    return { where: { organizationId }, isEmpty: false };
+  }
+
+  const userOrgIds = user.organizationMemberships.map((m) => m.organizationId);
+  if (!userOrgIds.length) {
+    return { where: null, isEmpty: true };
+  }
+  return { where: { organizationId: { in: userOrgIds } }, isEmpty: false };
+};
+
 
 const getLeads = async (req, res) => {
   try {
+    const ctx = req.authContext;
+    if (!ctx?.userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
     const {
       page = 1,
       limit = 10,
@@ -28,38 +104,92 @@ const getLeads = async (req, res) => {
       campaignIds,
       from,
       to,
-      organizationId,
+      organizationId: queryOrganizationId,
     } = req.query;
+
+    if (
+      queryOrganizationId != null &&
+      String(queryOrganizationId).trim() !== ""
+    ) {
+      if (ctx.isWebmaster) {
+        if (
+          !ctx.organizationId ||
+          String(queryOrganizationId) !== ctx.organizationId
+        ) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+      }
+      if (
+        !ctx.organizationId ||
+        String(queryOrganizationId) !== ctx.organizationId
+      ) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+    }
 
     const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
     const take = Math.min(Math.max(parseInt(limit, 10) || 10, 1), MAX_PAGE_LIMIT);
     const skip = (pageNumber - 1) * take;
 
-    // Build where clause with organization filter
-    const where = addOrganizationFilter(
-      {
-        ...(search && {
-          OR: [
-            { firstName: { contains: search, mode: "insensitive" } },
-            { lastName: { contains: search, mode: "insensitive" } },
-            { phone: { contains: search, mode: "insensitive" } },
-            { email: { contains: search, mode: "insensitive" } },
-          ],
+    let scopeWhere = {};
+    if (ctx.isWebmaster) {
+      if (!ctx.organizationId) {
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "No organization context",
+        });
+      }
+      const assignedCampaigns = await prismaClient.campaign.findMany({
+        where: { webmasterUserId: ctx.userId, organizationId: ctx.organizationId },
+        select: { id: true },
+      });
+      const ids = assignedCampaigns.map((c) => c.id);
+      if (!ids.length) {
+        return res.json({
+          leads: [],
+          total: 0,
+          page: pageNumber,
+          limit: take,
+        });
+      }
+      scopeWhere = { organizationId: ctx.organizationId, campaignId: { in: ids } };
+    } else {
+      if (!ctx.organizationId) {
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "No organization context",
+        });
+      }
+      scopeWhere = { organizationId: ctx.organizationId };
+    }
+
+    const where = {
+      ...scopeWhere,
+      ...(search && {
+        OR: [
+          { firstName: { contains: search, mode: "insensitive" } },
+          { lastName: { contains: search, mode: "insensitive" } },
+          { phone: { contains: search, mode: "insensitive" } },
+          { email: { contains: search, mode: "insensitive" } },
+        ],
+      }),
+      ...(status && status !== "all" && { status }),
+      ...(campaignIds && {
+        campaignId: {
+          in: campaignIds
+            .split(",")
+            .map((id) => String(id).trim())
+            .filter(Boolean),
+        },
+      }),
+      ...(from &&
+        to && {
+          createdAt: {
+            gte: new Date(from),
+            lte: new Date(to),
+          },
         }),
-        ...(status && status !== "all" && { status }),
-        ...(campaignIds && {
-          campaignId: { in: campaignIds.split(",").map((id) => parseInt(id)) },
-        }),
-        ...(from &&
-          to && {
-            createdAt: {
-              gte: new Date(from),
-              lte: new Date(to),
-            },
-          }),
-      },
-      organizationId
-    );
+    };
 
     // Get total count for pagination
     const total = await prismaClient.lead.count({ where });
@@ -122,6 +252,9 @@ const addLead = async (req, res) => {
       where: { apiKey },
       select: {
         id: true,
+        webmasterProfile: {
+          select: { isActive: true },
+        },
         organizationMemberships: {
           where: { status: "active" },
           select: {
@@ -133,7 +266,24 @@ const addLead = async (req, res) => {
             },
           },
         },
-        campaigns: {
+        ownedCampaigns: {
+          where: { campId },
+          select: {
+            id: true,
+            routeId: true,
+            lead_period: true,
+            organizationId: true,
+            route: {
+              select: {
+                url: true,
+                method: true,
+                attributes: true,
+                organizationId: true,
+              },
+            },
+          },
+        },
+        assignedWebmasterCampaigns: {
           where: { campId },
           select: {
             id: true,
@@ -157,20 +307,30 @@ const addLead = async (req, res) => {
       return res.status(400).json({ error: "Invalid API key" });
     }
 
-    const campaign = userWithCampaign.campaigns[0];
+    const campaign =
+      userWithCampaign.ownedCampaigns[0] ||
+      userWithCampaign.assignedWebmasterCampaigns[0];
     if (!campaign) {
       return res.status(400).json({ error: "Invalid campaign ID" });
     }
 
-    // Check if user has permission to add leads in this organization
-    const userMembership = userWithCampaign.organizationMemberships.find(
-      (membership) => membership.organizationId === campaign.organizationId
-    );
+    if (userWithCampaign.webmasterProfile) {
+      if (!userWithCampaign.webmasterProfile.isActive) {
+        return res.status(403).json({ error: "Webmaster account is inactive" });
+      }
+      if (!userWithCampaign.assignedWebmasterCampaigns[0]) {
+        return res.status(403).json({ error: "Access denied to this campaign" });
+      }
+    } else {
+      const userMembership = userWithCampaign.organizationMemberships.find(
+        (membership) => membership.organizationId === campaign.organizationId
+      );
 
-    if (!userMembership) {
-      return res
-        .status(403)
-        .json({ error: "Access denied to this organization" });
+      if (!userMembership) {
+        return res
+          .status(403)
+          .json({ error: "Access denied to this organization" });
+      }
     }
 
     // Check for duplicate lead
@@ -284,62 +444,46 @@ const addLead = async (req, res) => {
 const getLeadsByUser = async (req, res) => {
   try {
     const { userId } = req.auth;
-      const { organizationId } = req.query;
+    const ctx = req.authContext;
+    const { organizationId } = req.query;
 
     if (!userId) {
       return res.status(400).json({ error: "User ID not found" });
     }
 
-    const user = await prismaClient.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        role: true,
-        organizationMemberships: {
-          where: { status: "active" },
-          select: {
-            organizationId: true,
-            role: { select: { name: true, permissions: true } },
-          },
-        },
-      },
-    });
+    const requestedOrg =
+      organizationId != null && String(organizationId).trim() !== ""
+        ? String(organizationId)
+        : null;
+    const resolvedOrg = requestedOrg ?? ctx?.organizationId;
+
+    if (!ctx?.organizationId) {
+      return res.status(403).json({
+        error: "Forbidden",
+        message: "No organization context",
+      });
+    }
+    if (requestedOrg && requestedOrg !== ctx.organizationId) {
+      return res.status(403).json({
+        error: "Access denied. You are not a member of this organization.",
+      });
+    }
+
+    const user = await getUserWithMemberships(userId);
 
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    let where = {};
-
-    if (user.role === "webmaster") {
-      // Webmasters are scoped to their assigned campaigns only
-      const webmaster = await prismaClient.webmaster.findUnique({
-        where: { email: user.email },
-        select: { campaigns: { select: { id: true } } },
+    const access = await getLeadAccessWhereForUser(
+      user,
+      resolvedOrg,
+    );
+    if (access.isForbidden) {
+      return res.status(403).json({
+        error: "Access denied. You are not a member of this organization.",
       });
-      if (!webmaster) return res.status(404).json({ error: "Webmaster not found" });
-      const campaignIds = webmaster.campaigns.map((c) => c.id);
-      if (!campaignIds.length) return res.json([]);
-      where = { campaignId: { in: campaignIds } };
-    } else {
-      // Admin / member path — filter by organization membership
-      if (organizationId) {
-        const membership = user.organizationMemberships.find(
-          (m) => m.organizationId === organizationId
-        );
-        if (!membership) {
-          return res.status(403).json({
-            error: "Access denied. You are not a member of this organization.",
-          });
-        }
-        where.organizationId = organizationId;
-      } else {
-        const userOrgIds = user.organizationMemberships.map((m) => m.organizationId);
-        if (userOrgIds.length > 0) {
-          where.organizationId = { in: userOrgIds };
-        } else {
-          return res.json([]);
-        }
-      }
+    }
+    if (access.isEmpty) {
+      return res.json([]);
     }
 
     const exportLimit = Math.min(
@@ -347,14 +491,8 @@ const getLeadsByUser = async (req, res) => {
       MAX_EXPORT_LIMIT
     );
     const leads = await prismaClient.lead.findMany({
-      where,
-      select: {
-        id: true, firstName: true, lastName: true, phone: true, email: true,
-        status: true, userId: true, date: true, routeId: true, campaignId: true,
-        webhookResponse: true, createdAt: true, updatedAt: true, organizationId: true,
-        campaign: { select: { id: true, name: true } },
-        route: { select: { payout: true, name: true } },
-      },
+      where: access.where,
+      select: leadListSelect,
       orderBy: { createdAt: "desc" },
       take: exportLimit,
     });
@@ -379,61 +517,44 @@ const getLeadsByUserPagination = async (req, res) => {
 
   try {
     const { userId } = req.auth;
+    const ctx = req.authContext;
     if (!userId) return res.status(400).json({ error: "User ID not found" });
 
-    const user = await prismaClient.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        role: true,
-        organizationMemberships: {
-          where: { status: "active" },
-          select: {
-            organizationId: true,
-            role: { select: { name: true, permissions: true } },
-          },
-        },
-      },
-    });
+    const requestedOrg =
+      organizationId != null && String(organizationId).trim() !== ""
+        ? String(organizationId)
+        : null;
+    const resolvedOrg = requestedOrg ?? ctx?.organizationId;
+
+    if (!ctx?.organizationId) {
+      return res.status(403).json({
+        error: "Forbidden",
+        message: "No organization context",
+      });
+    }
+    if (requestedOrg && requestedOrg !== ctx.organizationId) {
+      return res.status(403).json({
+        error: "Access denied. You are not a member of this organization.",
+      });
+    }
+
+    const user = await getUserWithMemberships(userId);
 
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    let where = {};
-
-    if (user.role === "webmaster") {
-      // Webmasters are scoped to their assigned campaigns only
-      const webmaster = await prismaClient.webmaster.findUnique({
-        where: { email: user.email },
-        select: { campaigns: { select: { id: true } } },
+    const access = await getLeadAccessWhereForUser(
+      user,
+      resolvedOrg,
+    );
+    if (access.isForbidden) {
+      return res.status(403).json({
+        error: "Access denied. You are not a member of this organization.",
       });
-      if (!webmaster) return res.status(404).json({ error: "Webmaster not found" });
-      const campaignIds = webmaster.campaigns.map((c) => c.id);
-      if (!campaignIds.length) {
-        return res.json({ data: [], total: 0, page: pageNumber, totalPages: 0 });
-      }
-      where = { campaignId: { in: campaignIds } };
-    } else {
-      // Admin / member path — filter by organization membership
-      if (organizationId) {
-        const membership = user.organizationMemberships.find(
-          (m) => m.organizationId === organizationId
-        );
-        if (!membership) {
-          return res.status(403).json({
-            error: "Access denied. You are not a member of this organization.",
-          });
-        }
-        where.organizationId = organizationId;
-      } else {
-        const userOrgIds = user.organizationMemberships.map((m) => m.organizationId);
-        if (userOrgIds.length > 0) {
-          where.organizationId = { in: userOrgIds };
-        } else {
-          return res.json({ data: [], total: 0, page: pageNumber, totalPages: 0 });
-        }
-      }
     }
+    if (access.isEmpty) {
+      return res.json({ data: [], total: 0, page: pageNumber, totalPages: 0 });
+    }
+    const where = { ...access.where };
 
     // Search filter
     if (search) {
@@ -454,13 +575,7 @@ const getLeadsByUserPagination = async (req, res) => {
 
     const leads = await prismaClient.lead.findMany({
       where,
-      select: {
-        id: true, firstName: true, lastName: true, phone: true, email: true,
-        status: true, userId: true, date: true, routeId: true, campaignId: true,
-        webhookResponse: true, createdAt: true, updatedAt: true, organizationId: true,
-        campaign: { select: { id: true, name: true } },
-        route: { select: { payout: true, name: true } },
-      },
+      select: leadListSelect,
       orderBy: { createdAt: "desc" },
       skip,
       take,
@@ -477,18 +592,10 @@ const getLeadsByUserPagination = async (req, res) => {
 const getMonthlyLeadsByUser = async (req, res) => {
   try {
     const { userId } = req.auth;
+    const ctx = req.authContext;
 
     if (!userId) {
       return res.status(400).json({ error: "User ID not found" });
-    }
-
-    const user = await prismaClient.user.findUnique({
-      where: { id: userId },
-      select: { role: true, organizationId: true, email: true },
-    });
-
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
     }
 
     let where = {};
@@ -496,42 +603,32 @@ const getMonthlyLeadsByUser = async (req, res) => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(now.getDate() - 30);
 
-    if (user.role === "admin") {
-      if (!user.organizationId) {
-        return res
-          .status(400)
-          .json({ error: "Organization ID not found for admin" });
-      }
-
-      where = {
-        user: { organizationId: user.organizationId },
-        createdAt: {
-          gte: thirtyDaysAgo,
-          lte: now,
-        },
-      };
-    } else if (user.role === "webmaster") {
-      const webmaster = await prismaClient.webmaster.findUnique({
-        where: { email: user.email },
-        select: { campaigns: { select: { id: true } } },
+    if (ctx?.isWebmaster) {
+      const assignedCampaigns = await prismaClient.campaign.findMany({
+        where: { webmasterUserId: userId, organizationId: ctx.organizationId },
+        select: { id: true },
       });
-
-      if (!webmaster) {
-        return res.status(404).json({ error: "Webmaster not found" });
-      }
-
-      const campaignIds = webmaster.campaigns.map((c) => c.id);
+      const campaignIds = assignedCampaigns.map((c) => c.id);
       if (!campaignIds.length) return res.json([]);
 
       where = {
+        organizationId: ctx.organizationId,
         campaignId: { in: campaignIds },
         createdAt: {
           gte: thirtyDaysAgo,
           lte: now,
         },
       };
+    } else if (ctx?.organizationId) {
+      where = {
+        organizationId: ctx.organizationId,
+        createdAt: {
+          gte: thirtyDaysAgo,
+          lte: now,
+        },
+      };
     } else {
-      return res.status(403).json({ error: "Unauthorized role" });
+      return res.status(403).json({ error: "Unauthorized" });
     }
 
     const exportLimit = Math.min(
@@ -588,60 +685,43 @@ const getMonthlyLeadsByUser = async (req, res) => {
 const getPastTenDaysLeadsByUser = async (req, res) => {
   try {
     const { userId } = req.auth;
+    const ctx = req.authContext;
     if (!userId) {
       return res.status(400).json({ error: "User ID not found" });
-    }
-
-    const user = await prismaClient.user.findUnique({
-      where: { id: userId },
-      select: { role: true, organizationId: true, email: true },
-    });
-
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
     }
 
     let where = {};
     const now = new Date();
     const tenDaysAgo = new Date();
     tenDaysAgo.setDate(now.getDate() - 10);
-    const nowTime = new Date(); // for upper bound
+    const nowTime = new Date();
 
-    if (user.role === "admin") {
-      if (!user.organizationId) {
-        return res
-          .status(400)
-          .json({ error: "Organization ID not found for admin" });
-      }
-      where = {
-        user: { organizationId: user.organizationId },
-        createdAt: {
-          gte: tenDaysAgo,
-          lte: nowTime,
-        },
-      };
-    } else if (user.role === "webmaster") {
-      const webmaster = await prismaClient.webmaster.findUnique({
-        where: { email: user.email },
-        select: { campaigns: { select: { id: true } } },
+    if (ctx?.isWebmaster) {
+      const assignedCampaigns = await prismaClient.campaign.findMany({
+        where: { webmasterUserId: userId, organizationId: ctx.organizationId },
+        select: { id: true },
       });
-
-      if (!webmaster) {
-        return res.status(404).json({ error: "Webmaster not found" });
-      }
-
-      const campaignIds = webmaster.campaigns.map((c) => c.id);
+      const campaignIds = assignedCampaigns.map((c) => c.id);
       if (!campaignIds.length) return res.json([]);
 
       where = {
+        organizationId: ctx.organizationId,
         campaignId: { in: campaignIds },
         createdAt: {
           gte: tenDaysAgo,
           lte: nowTime,
         },
       };
+    } else if (ctx?.organizationId) {
+      where = {
+        organizationId: ctx.organizationId,
+        createdAt: {
+          gte: tenDaysAgo,
+          lte: nowTime,
+        },
+      };
     } else {
-      return res.status(403).json({ error: "Unauthorized role" });
+      return res.status(403).json({ error: "Unauthorized" });
     }
 
     const exportLimit = Math.min(

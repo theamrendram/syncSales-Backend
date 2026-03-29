@@ -1,149 +1,271 @@
 const prismaClient = require("../utils/prismaClient");
 
-const getCampaigns = async (req, res) => {
-  try {
-    const campaigns = await prismaClient.campaign.findMany({
-      include: {
-        user: true, // Include related User data
-        route: true, // Include related Route data
-      },
-    });
-    console.log(campaigns);
-    res.json(campaigns);
-  } catch (error) {
-    res
-      .status(500)
-      .json({ error: "Unable to fetch campaigns", details: error.message });
-  }
+const CAMPAIGN_MUTABLE_FIELDS = [
+  "name",
+  "campId",
+  "manager",
+  "routeId",
+  "lead_period",
+];
+
+const getMissingRequiredFields = (body) =>
+  CAMPAIGN_MUTABLE_FIELDS.filter((field) => body[field] === undefined);
+
+const buildCampaignPayload = (body, userId, organizationId) => {
+  const leadPeriod = Number(body.lead_period);
+  return {
+    name: body.name,
+    campId: body.campId,
+    userId,
+    routeId: body.routeId,
+    manager: body.manager,
+    lead_period: leadPeriod,
+    organizationId,
+  };
 };
 
-const getCampaignsByUser = async (req, res) => {
-  const { userId } = req.params;
-  console.log(userId);
+const campaignSelect = {
+  id: true,
+  name: true,
+  userId: true,
+  routeId: true,
+  campId: true,
+  status: true,
+  manager: true,
+  createdAt: true,
+  lead_period: true,
+  updatedAt: true,
+  organizationId: true,
+  isArchived: true,
+  route: {
+    select: {
+      id: true,
+      name: true,
+      product: true,
+      method: true,
+      url: true,
+      payout: true,
+      hasWebhook: true,
+      organizationId: true,
+      deletedAt: true,
+    },
+  },
+};
+
+const getCampaigns = async (req, res) => {
   try {
+    const take = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+    const where = {
+      organizationId: req.organizationId,
+      isArchived: false,
+    };
+
+    // Compatibility shape: allow ?userId=... but do not trust it for authorization.
+    // If userId filter is requested, filter by the authenticated user only.
+    if (req.query.userId !== undefined) {
+      where.userId = req.auth.userId;
+    }
+
     const campaigns = await prismaClient.campaign.findMany({
-      where: {
-        userId,
-        isArchived: false,
-      },
-      include: {
-        user: true, // Include related User data
-        route: true, // Include related Route data
-      },
+      where,
+      select: campaignSelect,
+      orderBy: { createdAt: "desc" },
+      take,
     });
-    res.json(campaigns);
+
+    return res.status(200).json({
+      success: true,
+      data: campaigns,
+      meta: { limit: take },
+    });
   } catch (error) {
-    res
-      .status(400)
-      .json({ error: "Unable to get campaigns", details: error.message });
+    return res.status(500).json({
+      success: false,
+      error: "Unable to fetch campaigns",
+      details: error.message,
+    });
   }
 };
 
 const getCampaignById = async (req, res) => {
   const { id } = req.params;
-  console.log("id", id);
   try {
-    const campaign = await prismaClient.campaign.findUnique({
+    const campaign = await prismaClient.campaign.findFirst({
       where: {
         id,
+        organizationId: req.organizationId,
         isArchived: false,
       },
-      include: {
-        user: false, // Include related User data
-        route: true, // Include related Route data
-      },
+      select: campaignSelect,
     });
+
     if (!campaign) {
-      return res.status(404).json({ error: "Campaign not found" });
+      return res
+        .status(404)
+        .json({ success: false, error: "Campaign not found" });
     }
-    res.json(campaign);
+
+    return res.status(200).json({ success: true, data: campaign });
   } catch (error) {
-    res
-      .status(400)
-      .json({ error: "Unable to get campaign", details: error.message });
+    return res.status(500).json({
+      success: false,
+      error: "Unable to get campaign",
+      details: error.message,
+    });
   }
 };
 
 const addCampaign = async (req, res) => {
-  const { name, campId, manager, userId, routeId, lead_period } = req.body;
-
-  console.log("adding new campaign", req.body);
   try {
+    const missingFields = getMissingRequiredFields(req.body);
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        details: `Required fields: ${missingFields.join(", ")}`,
+      });
+    }
+
+    const userId = req.auth.userId;
+    const { routeId } = req.body;
+    const leadPeriod = Number(req.body.lead_period);
+    if (!Number.isFinite(leadPeriod)) {
+      return res.status(400).json({
+        success: false,
+        error: "lead_period must be a valid number",
+      });
+    }
+
+    const route = await prismaClient.route.findFirst({
+      where: {
+        id: routeId,
+        organizationId: req.organizationId,
+        deletedAt: null,
+      },
+      select: { organizationId: true },
+    });
+
+    if (!route) {
+      return res.status(400).json({
+        success: false,
+        error: "routeId must belong to your active organization",
+      });
+    }
+
     const campaign = await prismaClient.campaign.create({
       data: {
-        name,
-        campId,
-        userId,
-        routeId,
-        manager,
-        lead_period: Number(lead_period),
+        ...buildCampaignPayload(req.body, userId, req.organizationId),
       },
     });
-    console.log(campaign);
-    res.status(201).json(campaign);
+
+    return res.status(201).json({ success: true, data: campaign });
   } catch (error) {
-    console.log(error);
-    res
-      .status(400)
-      .json({ error: "Unable to create campaign", details: error.message });
+    return res.status(500).json({
+      success: false,
+      error: "Unable to create campaign",
+      details: error.message,
+    });
   }
 };
 
 const editCampaign = async (req, res) => {
   const { id } = req.params;
-  const { name, userId, routeId, sellerId } = req.body;
-
   try {
-    const campaign = await prismaClient.campaign.update({
+    const existing = await prismaClient.campaign.findFirst({
+      where: { id, organizationId: req.organizationId, isArchived: false },
+    });
+    if (!existing) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Campaign not found" });
+    }
+
+    const missingFields = getMissingRequiredFields(req.body);
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields for PUT update",
+        details: `Required fields: ${missingFields.join(", ")}`,
+      });
+    }
+
+    const userId = req.auth.userId;
+    const { routeId } = req.body;
+    const leadPeriod = Number(req.body.lead_period);
+    if (!Number.isFinite(leadPeriod)) {
+      return res.status(400).json({
+        success: false,
+        error: "lead_period must be a valid number",
+      });
+    }
+
+    const route = await prismaClient.route.findFirst({
       where: {
-        id,
+        id: routeId,
+        organizationId: req.organizationId,
+        deletedAt: null,
       },
+      select: { organizationId: true },
+    });
+    if (!route) {
+      return res.status(400).json({
+        success: false,
+        error: "routeId must belong to your active organization",
+      });
+    }
+
+    const campaign = await prismaClient.campaign.update({
+      where: { id },
       data: {
-        name,
-        userId,
-        routeId,
-        sellerId, // Update sellerId if needed
+        ...buildCampaignPayload(req.body, userId, req.organizationId),
       },
     });
-    res.json(campaign);
+
+    return res.status(200).json({ success: true, data: campaign });
   } catch (error) {
-    res
-      .status(400)
-      .json({ error: "Unable to update campaign", details: error.message });
+    return res.status(500).json({
+      success: false,
+      error: "Unable to update campaign",
+      details: error.message,
+    });
   }
 };
 
 const deleteCampaign = async (req, res) => {
   const { id } = req.params;
-
-  console.log("id at delete campaign", id);
   try {
+    const existing = await prismaClient.campaign.findFirst({
+      where: { id, organizationId: req.organizationId, isArchived: false },
+    });
+    if (!existing) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Campaign not found" });
+    }
+
     const campaign = await prismaClient.campaign.update({
-      where: {
-        id,
-      },
+      where: { id },
       data: {
         isArchived: true,
         updatedAt: new Date(),
       },
     });
-    console.log("campaign at delete campaign", campaign);
-    res.json({
+
+    return res.status(200).json({
       success: true,
-      message: "Campaign archived successfully",
-      data: campaign.id,
+      data: { id: campaign.id },
     });
   } catch (error) {
-    console.log("error at delete campaign", error);
-    res
-      .status(400)
-      .json({ error: "Unable to archive campaign", details: error.message, success: false });
+    return res.status(500).json({
+      success: false,
+      error: "Unable to archive campaign",
+      details: error.message,
+    });
   }
 };
 module.exports = {
   getCampaigns,
   getCampaignById,
-  getCampaignsByUser,
   addCampaign,
   editCampaign,
   deleteCampaign,

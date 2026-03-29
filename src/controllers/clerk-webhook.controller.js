@@ -89,7 +89,6 @@ async function handleUserCreated(data) {
         email,
         firstName: data.first_name || "",
         lastName: data.last_name || "",
-        role: "admin", // Default role as per schema
         apiKey: generateKey(),
       },
     });
