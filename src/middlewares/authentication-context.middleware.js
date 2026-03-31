@@ -203,6 +203,18 @@ function authenticationContext(options = {}) {
       if (defaultOrgId) {
         const result = await buildAuthContextForOrg(userId, defaultOrgId, isWebmaster);
         if (result.error) {
+          if (!requireOrganization) {
+            attachContext(req, {
+              userId,
+              organizationId: null,
+              membership: null,
+              role: null,
+              permissions: null,
+              isOrganizationOwner: false,
+              isWebmaster: false,
+            });
+            return next();
+          }
           return res.status(result.status).json({
             success: false,
             error: result.error === "forbidden" ? "Forbidden" : "Bad Request",

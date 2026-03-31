@@ -12,9 +12,10 @@ const logger = require("../utils/logger");
 
 const MAX_PAGE_LIMIT = 100;
 const MAX_EXPORT_LIMIT = 1000;
-const leadModelHasOrgLeadId = !!prismaClient?._runtimeDataModel?.models?.Lead?.fields?.some(
-  (field) => field.name === "orgLeadId"
-);
+const leadModelHasOrgLeadId =
+  !!prismaClient?._runtimeDataModel?.models?.Lead?.fields?.some(
+    (field) => field.name === "orgLeadId",
+  );
 
 const leadListSelect = {
   id: true,
@@ -54,40 +55,62 @@ const getUserWithMemberships = async (userId) =>
 
 const getLeadAccessWhereForUser = async (user, organizationId) => {
   if (user.webmasterProfile) {
-    if (!organizationId) {
-      return { where: null, isForbidden: true };
-    }
+    // If org is not specified, allow access to all campaigns assigned to this webmaster
+    // across organizations (still constrained by campaign assignment).
     const assignedCampaigns = await prismaClient.campaign.findMany({
-      where: { webmasterUserId: user.id, organizationId },
-      select: { id: true },
+      where: {
+        webmasterUserId: user.id,
+        ...(organizationId ? { organizationId } : {}),
+      },
+      select: { id: true, organizationId: true },
     });
     const campaignIds = assignedCampaigns.map((c) => c.id);
     if (!campaignIds.length) {
       return { where: null, isEmpty: true };
     }
+    if (organizationId) {
+      return {
+        where: { organizationId, campaignId: { in: campaignIds } },
+        isEmpty: false,
+      };
+    }
     return {
-      where: { organizationId, campaignId: { in: campaignIds } },
+      where: { campaignId: { in: campaignIds } },
       isEmpty: false,
     };
   }
 
   if (organizationId) {
     const membership = user.organizationMemberships.find(
-      (m) => m.organizationId === organizationId
+      (m) => m.organizationId === organizationId,
     );
     if (!membership) {
-      return { where: null, isForbidden: true };
+      const org = await prismaClient.organization.findUnique({
+        where: { id: organizationId },
+        select: { ownerId: true },
+      });
+      if (!org || org.ownerId !== user.id) {
+        return { where: null, isForbidden: true };
+      }
     }
     return { where: { organizationId }, isEmpty: false };
   }
 
-  const userOrgIds = user.organizationMemberships.map((m) => m.organizationId);
-  if (!userOrgIds.length) {
+  const membershipOrgIds = user.organizationMemberships.map(
+    (m) => m.organizationId,
+  );
+  const ownedOrgs = await prismaClient.organization.findMany({
+    where: { ownerId: user.id },
+    select: { id: true },
+  });
+  const ownedOrgIds = ownedOrgs.map((o) => o.id);
+  const orgIds = Array.from(new Set([...membershipOrgIds, ...ownedOrgIds]));
+
+  if (!orgIds.length) {
     return { where: null, isEmpty: true };
   }
-  return { where: { organizationId: { in: userOrgIds } }, isEmpty: false };
+  return { where: { organizationId: { in: orgIds } }, isEmpty: false };
 };
-
 
 const getLeads = async (req, res) => {
   try {
@@ -128,7 +151,10 @@ const getLeads = async (req, res) => {
     }
 
     const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
-    const take = Math.min(Math.max(parseInt(limit, 10) || 10, 1), MAX_PAGE_LIMIT);
+    const take = Math.min(
+      Math.max(parseInt(limit, 10) || 10, 1),
+      MAX_PAGE_LIMIT,
+    );
     const skip = (pageNumber - 1) * take;
 
     let scopeWhere = {};
@@ -140,7 +166,10 @@ const getLeads = async (req, res) => {
         });
       }
       const assignedCampaigns = await prismaClient.campaign.findMany({
-        where: { webmasterUserId: ctx.userId, organizationId: ctx.organizationId },
+        where: {
+          webmasterUserId: ctx.userId,
+          organizationId: ctx.organizationId,
+        },
         select: { id: true },
       });
       const ids = assignedCampaigns.map((c) => c.id);
@@ -152,7 +181,10 @@ const getLeads = async (req, res) => {
           limit: take,
         });
       }
-      scopeWhere = { organizationId: ctx.organizationId, campaignId: { in: ids } };
+      scopeWhere = {
+        organizationId: ctx.organizationId,
+        campaignId: { in: ids },
+      };
     } else {
       if (!ctx.organizationId) {
         return res.status(403).json({
@@ -173,7 +205,10 @@ const getLeads = async (req, res) => {
           { email: { contains: search, mode: "insensitive" } },
         ],
       }),
-      ...(status && status !== "all" && { status }),
+      ...(status &&
+        status !== "all" && {
+          status: { equals: status, mode: "insensitive" },
+        }),
       ...(campaignIds && {
         campaignId: {
           in: campaignIds
@@ -319,11 +354,13 @@ const addLead = async (req, res) => {
         return res.status(403).json({ error: "Webmaster account is inactive" });
       }
       if (!userWithCampaign.assignedWebmasterCampaigns[0]) {
-        return res.status(403).json({ error: "Access denied to this campaign" });
+        return res
+          .status(403)
+          .json({ error: "Access denied to this campaign" });
       }
     } else {
       const userMembership = userWithCampaign.organizationMemberships.find(
-        (membership) => membership.organizationId === campaign.organizationId
+        (membership) => membership.organizationId === campaign.organizationId,
       );
 
       if (!userMembership) {
@@ -413,7 +450,7 @@ const addLead = async (req, res) => {
           campaign.route.url,
           campaign.route.method,
           campaign.route.attributes,
-          newLead
+          newLead,
         );
 
         // Update lead with webhook response
@@ -456,14 +493,7 @@ const getLeadsByUser = async (req, res) => {
         ? String(organizationId)
         : null;
     const resolvedOrg = requestedOrg ?? ctx?.organizationId;
-
-    if (!ctx?.organizationId) {
-      return res.status(403).json({
-        error: "Forbidden",
-        message: "No organization context",
-      });
-    }
-    if (requestedOrg && requestedOrg !== ctx.organizationId) {
+    if (requestedOrg && ctx?.organizationId && requestedOrg !== ctx.organizationId) {
       return res.status(403).json({
         error: "Access denied. You are not a member of this organization.",
       });
@@ -473,10 +503,7 @@ const getLeadsByUser = async (req, res) => {
 
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    const access = await getLeadAccessWhereForUser(
-      user,
-      resolvedOrg,
-    );
+    const access = await getLeadAccessWhereForUser(user, resolvedOrg);
     if (access.isForbidden) {
       return res.status(403).json({
         error: "Access denied. You are not a member of this organization.",
@@ -488,7 +515,7 @@ const getLeadsByUser = async (req, res) => {
 
     const exportLimit = Math.min(
       Math.max(Number(req.query.limit) || 200, 1),
-      MAX_EXPORT_LIMIT
+      MAX_EXPORT_LIMIT,
     );
     const leads = await prismaClient.lead.findMany({
       where: access.where,
@@ -499,7 +526,9 @@ const getLeadsByUser = async (req, res) => {
     res.status(200).json(leads);
   } catch (error) {
     logger.error({ err: error }, "Error fetching user leads");
-    res.status(500).json({ error: "Unable to get leads", details: error.message });
+    res
+      .status(500)
+      .json({ error: "Unable to get leads", details: error.message });
   }
 };
 
@@ -509,6 +538,9 @@ const getLeadsByUserPagination = async (req, res) => {
     page = 1,
     limit = 10,
     status = "all",
+    campaignIds,
+    from,
+    to,
     organizationId,
   } = req.query;
   const pageNumber = Math.max(Number(page) || 1, 1);
@@ -542,10 +574,11 @@ const getLeadsByUserPagination = async (req, res) => {
 
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    const access = await getLeadAccessWhereForUser(
-      user,
-      resolvedOrg,
-    );
+    let access = await getLeadAccessWhereForUser(user, resolvedOrg);
+    if (access.isForbidden && !requestedOrg) {
+      // If the resolved org context is not accessible, fall back to "all orgs I belong to".
+      access = await getLeadAccessWhereForUser(user, null);
+    }
     if (access.isForbidden) {
       return res.status(403).json({
         error: "Access denied. You are not a member of this organization.",
@@ -568,7 +601,27 @@ const getLeadsByUserPagination = async (req, res) => {
 
     // Status filter
     if (status && status !== "all") {
-      where.status = status;
+      where.status = { equals: status, mode: "insensitive" };
+    }
+
+    // Campaign filter (comma-separated ids)
+    if (campaignIds) {
+      const ids = String(campaignIds)
+        .split(",")
+        .map((id) => String(id).trim())
+        .filter(Boolean);
+      if (ids.length) {
+        where.campaignId = { in: ids };
+      }
+    }
+
+    // Date filter (createdAt)
+    if (from && to) {
+      const fromDate = new Date(String(from));
+      const toDate = new Date(String(to));
+      if (!Number.isNaN(fromDate.getTime()) && !Number.isNaN(toDate.getTime())) {
+        where.createdAt = { gte: fromDate, lte: toDate };
+      }
     }
 
     const total = await prismaClient.lead.count({ where });
@@ -582,10 +635,12 @@ const getLeadsByUserPagination = async (req, res) => {
     });
 
     const totalPages = Math.ceil(total / take);
-    res.json({ data: leads, total, page: pageNumber, totalPages });
+    res.json({ data: leads, total, page: pageNumber, limit: take, totalPages });
   } catch (error) {
     logger.error({ err: error }, "Error fetching paginated leads");
-    res.status(500).json({ error: "Unable to get leads", details: error.message });
+    res
+      .status(500)
+      .json({ error: "Unable to get leads", details: error.message });
   }
 };
 
@@ -631,10 +686,6 @@ const getMonthlyLeadsByUser = async (req, res) => {
       return res.status(403).json({ error: "Unauthorized" });
     }
 
-    const exportLimit = Math.min(
-      Math.max(Number(req.query.limit) || 500, 1),
-      MAX_EXPORT_LIMIT
-    );
     const leads = await prismaClient.lead.findMany({
       where,
       select: {
@@ -670,7 +721,6 @@ const getMonthlyLeadsByUser = async (req, res) => {
         },
       },
       orderBy: { createdAt: "desc" },
-      take: exportLimit,
     });
     res.status(200).json(leads);
   } catch (error) {
@@ -726,7 +776,7 @@ const getPastTenDaysLeadsByUser = async (req, res) => {
 
     const exportLimit = Math.min(
       Math.max(Number(req.query.limit) || 500, 1),
-      MAX_EXPORT_LIMIT
+      MAX_EXPORT_LIMIT,
     );
     const leads = await prismaClient.lead.findMany({
       where,

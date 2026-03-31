@@ -46,6 +46,9 @@ const {
 } = require("./middlewares/authentication-context.middleware");
 
 const organizationContextStrict = authenticationContext();
+const organizationContextOptional = authenticationContext({
+  requireOrganization: false,
+});
 
 // clerk webhook route -> do not protect this route or move it to the end of the middleware chain
 app.use("/api/v1/clerk-webhook", clerkWebhookRoute);
@@ -98,7 +101,7 @@ app.use(
   campaignRoute,
 );
 app.use("/api/v1/webmaster", requireAuth(), webmasterRoute);
-app.use("/api/v1/lead", requireAuth(), organizationContextStrict, leadsRoute);
+app.use("/api/v1/lead", requireAuth(), organizationContextOptional, leadsRoute);
 app.use(
   "/api/v1/chart",
   requireAuth(),
