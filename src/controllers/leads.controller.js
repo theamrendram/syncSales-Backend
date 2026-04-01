@@ -9,6 +9,7 @@ const {
   getLeadsGroupedByDateRouteCampaign,
 } = require("../utils/chart-functions");
 const logger = require("../utils/logger");
+const { Parser } = require("json2csv");
 
 const MAX_PAGE_LIMIT = 100;
 const MAX_EXPORT_LIMIT = 1000;
@@ -644,6 +645,140 @@ const getLeadsByUserPagination = async (req, res) => {
   }
 };
 
+const downloadLeadsCsv = async (req, res) => {
+  try {
+    const ctx = req.authContext;
+    const { userId } = req.auth || {};
+    if (!userId || !ctx?.userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const {
+      search = "",
+      status = "all",
+      campaignIds,
+      from,
+      to,
+      organizationId,
+      limit,
+    } = req.query;
+
+    const requestedOrg =
+      organizationId != null && String(organizationId).trim() !== ""
+        ? String(organizationId)
+        : null;
+    const resolvedOrg = requestedOrg ?? ctx?.organizationId;
+
+    if (!ctx?.organizationId) {
+      return res.status(403).json({
+        error: "Forbidden",
+        message: "No organization context",
+      });
+    }
+    if (requestedOrg && requestedOrg !== ctx.organizationId) {
+      return res.status(403).json({
+        error: "Access denied. You are not a member of this organization.",
+      });
+    }
+
+    const user = await getUserWithMemberships(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    let access = await getLeadAccessWhereForUser(user, resolvedOrg);
+    if (access.isForbidden && !requestedOrg) {
+      access = await getLeadAccessWhereForUser(user, null);
+    }
+    if (access.isForbidden) {
+      return res.status(403).json({
+        error: "Access denied. You are not a member of this organization.",
+      });
+    }
+    if (access.isEmpty) {
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader(
+        "Content-Disposition",
+        'attachment; filename="leads.csv"',
+      );
+      return res.send(
+        "ID,First Name,Last Name,Email,Phone,Status,Campaign,Created At\n",
+      );
+    }
+
+    const where = { ...access.where };
+
+    if (search) {
+      where.OR = [
+        { firstName: { contains: search, mode: "insensitive" } },
+        { lastName: { contains: search, mode: "insensitive" } },
+        { phone: { contains: search, mode: "insensitive" } },
+        { email: { contains: search, mode: "insensitive" } },
+      ];
+    }
+
+    if (status && status !== "all") {
+      where.status = { equals: status, mode: "insensitive" };
+    }
+
+    if (campaignIds) {
+      const ids = String(campaignIds)
+        .split(",")
+        .map((id) => String(id).trim())
+        .filter(Boolean);
+      if (ids.length) {
+        where.campaignId = { in: ids };
+      }
+    }
+
+    if (from && to) {
+      const fromDate = new Date(String(from));
+      const toDate = new Date(String(to));
+      if (!Number.isNaN(fromDate.getTime()) && !Number.isNaN(toDate.getTime())) {
+        where.createdAt = { gte: fromDate, lte: toDate };
+      }
+    }
+
+    const exportLimit = Math.min(
+      Math.max(Number(limit) || MAX_EXPORT_LIMIT, 1),
+      MAX_EXPORT_LIMIT,
+    );
+
+    const leads = await prismaClient.lead.findMany({
+      where,
+      select: leadListSelect,
+      orderBy: { createdAt: "desc" },
+      take: exportLimit,
+    });
+
+    const fields = [
+      { label: "ID", value: "id" },
+      { label: "First Name", value: "firstName" },
+      { label: "Last Name", value: "lastName" },
+      { label: "Email", value: "email" },
+      { label: "Phone", value: "phone" },
+      { label: "Status", value: "status" },
+      { label: "Campaign", value: (row) => row.campaign?.name || "N/A" },
+      {
+        label: "Created At",
+        value: (row) =>
+          row.createdAt ? new Date(row.createdAt).toISOString() : "",
+      },
+    ];
+
+    const parser = new Parser({ fields });
+    const csv = parser.parse(leads);
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", 'attachment; filename="leads.csv"');
+    return res.send(csv);
+  } catch (error) {
+    logger.error({ err: error }, "Error downloading leads csv");
+    return res.status(500).json({
+      error: "Unable to download leads",
+      details: error.message,
+    });
+  }
+};
+
 const getMonthlyLeadsByUser = async (req, res) => {
   try {
     const { userId } = req.auth;
@@ -825,6 +960,7 @@ module.exports = {
   addLead,
   getLeadsByUser,
   getLeadsByUserPagination,
+  downloadLeadsCsv,
   getMonthlyLeadsByUser,
   getPastTenDaysLeadsByUser,
 };
