@@ -2,7 +2,7 @@ const prismaClient = require("../utils/prismaClient");
 const { randomUUID } = require("crypto");
 const { sendWebhook } = require("../utils/sendWebhook");
 const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
-const getIpAndCountry = require("../utils/get-ip-and-country");
+const getClientIp = require("../utils/get-client-ip");
 const { encodePublicOrgLeadId } = require("../utils/org-lead-id");
 const { resolveApiKeyPrincipal } = require("../utils/api-key-principal");
 
@@ -269,7 +269,8 @@ const processLeadRequest = async (req, res, source) => {
   }
 
   // Sanitize and parse input
-  const { ip, country } = getIpAndCountry(req);
+  const ip = getClientIp(req);
+  const country = "IN";
   const nameParts = (name || "").trim().split(/\s+/);
   const firstName = nameParts[0] || "";
   const lastName = nameParts.slice(1).join(" ") || null;

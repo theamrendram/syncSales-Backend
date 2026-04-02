@@ -1,7 +1,7 @@
 const prismaClient = require("../utils/prismaClient");
 const { sendWebhook } = require("../utils/sendWebhook");
 const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
-const getIpAndCountry = require("../utils/get-ip-and-country");
+const getClientIp = require("../utils/get-client-ip");
 const {
   chartMetrics,
   generateExtendedReport,
@@ -281,7 +281,8 @@ const addLead = async (req, res) => {
       });
     }
 
-    const { ip, country } = getIpAndCountry(req);
+    const ip = getClientIp(req);
+    const country = "IN";
 
     // Get user and campaign in a single query with organization context
     const userWithCampaign = await prismaClient.user.findUnique({
