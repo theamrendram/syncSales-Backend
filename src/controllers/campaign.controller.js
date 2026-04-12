@@ -1,4 +1,5 @@
 const prismaClient = require("../utils/prismaClient");
+const { getCampaignIdsForWebmaster } = require("../utils/webmaster-campaigns");
 
 const CAMPAIGN_MUTABLE_FIELDS = [
   "name",
@@ -55,10 +56,26 @@ const campaignSelect = {
 const getCampaigns = async (req, res) => {
   try {
     const take = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+    const ctx = req.authContext;
     const where = {
       organizationId: req.organizationId,
       isArchived: false,
     };
+
+    if (ctx?.isWebmaster) {
+      const ids = await getCampaignIdsForWebmaster(
+        ctx.userId,
+        ctx.organizationId,
+      );
+      if (!ids.length) {
+        return res.status(200).json({
+          success: true,
+          data: [],
+          meta: { limit: take },
+        });
+      }
+      where.id = { in: ids };
+    }
 
     // Compatibility shape: allow ?userId=... but do not trust it for authorization.
     // If userId filter is requested, filter by the authenticated user only.
@@ -90,6 +107,19 @@ const getCampaigns = async (req, res) => {
 const getCampaignById = async (req, res) => {
   const { id } = req.params;
   try {
+    const ctx = req.authContext;
+    if (ctx?.isWebmaster) {
+      const allowed = await getCampaignIdsForWebmaster(
+        ctx.userId,
+        ctx.organizationId,
+      );
+      if (!allowed.includes(id)) {
+        return res
+          .status(404)
+          .json({ success: false, error: "Campaign not found" });
+      }
+    }
+
     const campaign = await prismaClient.campaign.findFirst({
       where: {
         id,

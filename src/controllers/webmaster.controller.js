@@ -1,5 +1,11 @@
 const { clerkClient } = require("@clerk/express");
 const prismaClient = require("../utils/prismaClient");
+const {
+  ensureDefaultRolesForOrganization,
+} = require("../utils/default-org-roles");
+const {
+  getExplicitRouteIdsForWebmaster,
+} = require("../utils/webmaster-campaigns");
 
 const getOwnerOrganization = async (userId) => {
   return prismaClient.organization.findUnique({
@@ -14,21 +20,38 @@ const formatWebmaster = (w) => ({
   firstName: w.firstName,
   lastName: w.lastName,
   isActive: w.webmasterProfile?.isActive ?? true,
-  campaigns: w.assignedWebmasterCampaigns,
+  campaigns: (w.webmasterCampaignMemberships || [])
+    .map((m) => m.campaign)
+    .filter(Boolean),
+  routes: (w.resourceAccess || [])
+    .map((a) => a.route)
+    .filter(Boolean),
 });
 
 const addWebmaster = async (req, res) => {
-  const { email: emailAddress, password, fullName, campaigns } = await req.body;
+  const {
+    email: emailAddress,
+    password,
+    fullName,
+    campaigns,
+    routes,
+  } = await req.body;
   const { userId } = req.auth;
 
-  if (!emailAddress || !password || !fullName || !campaigns) {
+  if (!emailAddress || !password || !fullName) {
     return res.status(400).json({
-      error: "Missing required fields: email, password, fullName, campaigns",
+      error: "Missing required fields: email, password, fullName",
     });
   }
 
   const email = String(emailAddress).toLowerCase();
   const normalizedCampaigns = Array.isArray(campaigns) ? campaigns : [];
+  const normalizedRoutes = Array.isArray(routes) ? routes : [];
+  if (!normalizedCampaigns.length && !normalizedRoutes.length) {
+    return res.status(400).json({
+      error: "Assign at least one campaign or route.",
+    });
+  }
 
   try {
     const ownerOrganization = await getOwnerOrganization(userId);
@@ -68,6 +91,8 @@ const addWebmaster = async (req, res) => {
       },
     });
 
+    await ensureDefaultRolesForOrganization(ownerOrganization.id);
+
     const memberRole = await prismaClient.role.findFirst({
       where: {
         organizationId: ownerOrganization.id,
@@ -77,8 +102,7 @@ const addWebmaster = async (req, res) => {
 
     if (!memberRole) {
       return res.status(500).json({
-        error:
-          "Organization roles not initialized. Run organization setup first.",
+        error: "Could not resolve viewer role for this organization.",
       });
     }
 
@@ -109,27 +133,59 @@ const addWebmaster = async (req, res) => {
       },
     });
 
-    const campaignConnections = normalizedCampaigns.map((campaignId) => ({
-      id: campaignId,
-    }));
-
-    if (campaignConnections.length) {
-      await prismaClient.campaign.updateMany({
+    if (normalizedCampaigns.length) {
+      const validCampaigns = await prismaClient.campaign.findMany({
         where: {
-          id: { in: campaignConnections.map((c) => c.id) },
+          id: { in: normalizedCampaigns.map(String) },
           organizationId: ownerOrganization.id,
         },
-        data: {
-          webmasterUserId: createdUser.id,
-        },
+        select: { id: true },
       });
+      if (validCampaigns.length) {
+        await prismaClient.campaignWebmaster.createMany({
+          data: validCampaigns.map((c) => ({
+            campaignId: c.id,
+            userId: createdUser.id,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    }
+    if (normalizedRoutes.length) {
+      const validRoutes = await prismaClient.route.findMany({
+        where: {
+          id: { in: normalizedRoutes.map(String) },
+          organizationId: ownerOrganization.id,
+        },
+        select: { id: true },
+      });
+      if (validRoutes.length) {
+        await prismaClient.accessControl.createMany({
+          data: validRoutes.map((r) => ({
+            userId: createdUser.id,
+            organizationId: ownerOrganization.id,
+            routeId: r.id,
+            accessType: "view",
+          })),
+          skipDuplicates: true,
+        });
+      }
     }
 
-    const assignedCampaigns = await prismaClient.campaign.findMany({
-      where: {
-        webmasterUserId: createdUser.id,
-      },
+    const links = await prismaClient.campaignWebmaster.findMany({
+      where: { userId: createdUser.id },
+      include: { campaign: true },
     });
+    const assignedCampaigns = links.map((l) => l.campaign);
+    const explicitRouteIds = await getExplicitRouteIdsForWebmaster(
+      createdUser.id,
+      ownerOrganization.id,
+    );
+    const assignedRoutes = explicitRouteIds.length
+      ? await prismaClient.route.findMany({
+          where: { id: { in: explicitRouteIds } },
+        })
+      : [];
 
     res.status(201).json({
       message: "Webmaster created",
@@ -140,6 +196,7 @@ const addWebmaster = async (req, res) => {
         lastName: createdUser.lastName,
         name: `${createdUser.firstName} ${createdUser.lastName}`,
         campaigns: assignedCampaigns,
+        routes: assignedRoutes,
       },
     });
   } catch (error) {
@@ -184,7 +241,13 @@ const getWebmasters = async (req, res) => {
       },
       include: {
         webmasterProfile: true,
-        assignedWebmasterCampaigns: true,
+        webmasterCampaignMemberships: {
+          include: { campaign: true },
+        },
+        resourceAccess: {
+          where: { routeId: { not: null }, accessType: "view" },
+          include: { route: true },
+        },
       },
     });
 
@@ -218,7 +281,13 @@ const getWebmasterById = async (req, res) => {
       },
       include: {
         webmasterProfile: true,
-        assignedWebmasterCampaigns: true,
+        webmasterCampaignMemberships: {
+          include: { campaign: true },
+        },
+        resourceAccess: {
+          where: { routeId: { not: null }, accessType: "view" },
+          include: { route: true },
+        },
       },
     });
 
@@ -236,7 +305,7 @@ const getWebmasterById = async (req, res) => {
 
 const updateWebmaster = async (req, res) => {
   const { id } = req.params;
-  const { campaigns, firstName, lastName, isActive } = req.body;
+  const { campaigns, routes, firstName, lastName, isActive } = req.body;
   try {
     const { userId } = req.auth;
     const ownerOrganization = await getOwnerOrganization(userId);
@@ -254,7 +323,9 @@ const updateWebmaster = async (req, res) => {
       },
       include: {
         webmasterProfile: true,
-        assignedWebmasterCampaigns: true,
+        webmasterCampaignMemberships: {
+          include: { campaign: true },
+        },
       },
     });
 
@@ -263,20 +334,60 @@ const updateWebmaster = async (req, res) => {
     }
 
     const newCampaignIds = Array.isArray(campaigns) ? campaigns : [];
+    const newRouteIds = Array.isArray(routes) ? routes : [];
 
-    await prismaClient.campaign.updateMany({
-      where: { webmasterUserId: id, organizationId: ownerOrganization.id },
-      data: { webmasterUserId: null },
+    await prismaClient.campaignWebmaster.deleteMany({
+      where: {
+        userId: id,
+        campaign: { organizationId: ownerOrganization.id },
+      },
     });
 
     if (newCampaignIds.length) {
-      await prismaClient.campaign.updateMany({
+      const validCampaigns = await prismaClient.campaign.findMany({
         where: {
-          id: { in: newCampaignIds },
+          id: { in: newCampaignIds.map(String) },
           organizationId: ownerOrganization.id,
         },
-        data: { webmasterUserId: id },
+        select: { id: true },
       });
+      if (validCampaigns.length) {
+        await prismaClient.campaignWebmaster.createMany({
+          data: validCampaigns.map((c) => ({
+            campaignId: c.id,
+            userId: id,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    }
+    await prismaClient.accessControl.deleteMany({
+      where: {
+        userId: id,
+        organizationId: ownerOrganization.id,
+        routeId: { not: null },
+      },
+    });
+
+    if (newRouteIds.length) {
+      const validRoutes = await prismaClient.route.findMany({
+        where: {
+          id: { in: newRouteIds.map(String) },
+          organizationId: ownerOrganization.id,
+        },
+        select: { id: true },
+      });
+      if (validRoutes.length) {
+        await prismaClient.accessControl.createMany({
+          data: validRoutes.map((r) => ({
+            userId: id,
+            organizationId: ownerOrganization.id,
+            routeId: r.id,
+            accessType: "view",
+          })),
+          skipDuplicates: true,
+        });
+      }
     }
 
     const updated = await prismaClient.user.update({
@@ -295,7 +406,13 @@ const updateWebmaster = async (req, res) => {
       },
       include: {
         webmasterProfile: true,
-        assignedWebmasterCampaigns: true,
+        webmasterCampaignMemberships: {
+          include: { campaign: true },
+        },
+        resourceAccess: {
+          where: { routeId: { not: null }, accessType: "view" },
+          include: { route: true },
+        },
       },
     });
 
@@ -316,8 +433,8 @@ const updateWebmaster = async (req, res) => {
 const deleteWebmaster = async (req, res) => {
   const { id } = req.params;
   try {
-    const { userId } = req.auth;
-    const ownerOrganization = await getOwnerOrganization(userId);
+    const requestingUserId = req.auth.userId;
+    const ownerOrganization = await getOwnerOrganization(requestingUserId);
 
     const current = await prismaClient.user.findFirst({
       where: {
@@ -337,9 +454,22 @@ const deleteWebmaster = async (req, res) => {
       return;
     }
 
-    await prismaClient.campaign.updateMany({
-      where: { webmasterUserId: id, organizationId: ownerOrganization.id },
-      data: { webmasterUserId: null },
+    await prismaClient.campaignWebmaster.deleteMany({
+      where: { userId: id },
+    });
+
+    await prismaClient.organizationMember.deleteMany({
+      where: { userId: id },
+    });
+
+    await prismaClient.lead.updateMany({
+      where: { userId: id },
+      data: { userId: requestingUserId },
+    });
+
+    await prismaClient.route.updateMany({
+      where: { userId: id },
+      data: { userId: requestingUserId },
     });
 
     await prismaClient.user.delete({

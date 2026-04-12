@@ -183,7 +183,9 @@ const getPrincipalWithCampaign = async (apiKey, campId) => {
     where: {
       campId,
       organizationId: principal.organizationId || undefined,
-      webmasterUserId: principal.actorUserId,
+      webmasterMemberships: {
+        some: { userId: principal.actorUserId },
+      },
     },
     select: {
       id: true,

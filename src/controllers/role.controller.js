@@ -1,5 +1,4 @@
 const prisma = require("../utils/prismaClient");
-const { parseRolePermissions } = require("../utils/role-permissions-schema");
 
 function assertRoleRouteContext(req, organizationId) {
   return (
@@ -9,80 +8,13 @@ function assertRoleRouteContext(req, organizationId) {
   );
 }
 
-function handlePermissionsParseError(res, err) {
-  if (err?.name === "ZodError") {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid permissions payload",
-      issues: err.issues,
-    });
-  }
-  throw err;
-}
-
-// Create a new role
+// Create a new role (disabled for MVP — seeded roles only)
 const createRole = async (req, res) => {
-  try {
-    const { organizationId } = req.params;
-    const { name, description, permissions } = req.body;
-
-    if (!assertRoleRouteContext(req, organizationId)) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You are not a member of this organization.",
-      });
-    }
-
-    if (!req.authContext.permissions?.canManageRoles) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You do not have permission to manage roles.",
-      });
-    }
-
-    let validatedPermissions;
-    try {
-      validatedPermissions = parseRolePermissions(permissions);
-    } catch (err) {
-      return handlePermissionsParseError(res, err);
-    }
-
-    const existingRole = await prisma.role.findFirst({
-      where: {
-        name,
-        organizationId,
-      },
-    });
-
-    if (existingRole) {
-      return res.status(400).json({
-        success: false,
-        message: "Role name already exists in this organization",
-      });
-    }
-
-    const role = await prisma.role.create({
-      data: {
-        name,
-        description,
-        permissions: validatedPermissions,
-        organizationId,
-      },
-    });
-
-    res.status(201).json({
-      success: true,
-      data: role,
-      message: "Role created successfully",
-    });
-  } catch (error) {
-    console.error("Error creating role:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to create role",
-      error: error.message,
-    });
-  }
+  return res.status(403).json({
+    success: false,
+    message:
+      "Custom role creation is disabled for this release. Use seeded roles only.",
+  });
 };
 
 // Get all roles for an organization
@@ -129,175 +61,22 @@ const getRoles = async (req, res) => {
   }
 };
 
-// Update a role
+// Update a role (disabled for MVP — seeded roles only)
 const updateRole = async (req, res) => {
-  try {
-    const { organizationId, roleId } = req.params;
-    const { name, description, permissions } = req.body;
-
-    if (!assertRoleRouteContext(req, organizationId)) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You are not a member of this organization.",
-      });
-    }
-
-    if (!req.authContext.permissions?.canManageRoles) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You do not have permission to manage roles.",
-      });
-    }
-
-    const existingRole = await prisma.role.findFirst({
-      where: {
-        id: roleId,
-        organizationId,
-      },
-    });
-
-    if (!existingRole) {
-      return res.status(404).json({
-        success: false,
-        message: "Role not found",
-      });
-    }
-
-    if (existingRole.name === "owner") {
-      return res.status(400).json({
-        success: false,
-        message: "Cannot modify owner role",
-      });
-    }
-
-    if (name && name !== existingRole.name) {
-      const nameConflict = await prisma.role.findFirst({
-        where: {
-          name,
-          organizationId,
-          id: { not: roleId },
-        },
-      });
-
-      if (nameConflict) {
-        return res.status(400).json({
-          success: false,
-          message: "Role name already exists in this organization",
-        });
-      }
-    }
-
-    let validatedPermissions;
-    if (permissions !== undefined) {
-      try {
-        validatedPermissions = parseRolePermissions(permissions);
-      } catch (err) {
-        return handlePermissionsParseError(res, err);
-      }
-    }
-
-    const data = {
-      ...(name !== undefined && { name }),
-      ...(description !== undefined && { description }),
-      ...(validatedPermissions !== undefined && {
-        permissions: validatedPermissions,
-      }),
-    };
-
-    if (Object.keys(data).length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No valid fields to update",
-      });
-    }
-
-    const role = await prisma.role.update({
-      where: { id: roleId },
-      data,
-    });
-
-    res.json({
-      success: true,
-      data: role,
-      message: "Role updated successfully",
-    });
-  } catch (error) {
-    console.error("Error updating role:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to update role",
-      error: error.message,
-    });
-  }
+  return res.status(403).json({
+    success: false,
+    message:
+      "Custom role updates are disabled for this release. Use seeded roles only.",
+  });
 };
 
-// Delete a role
+// Delete a role (disabled for MVP — seeded roles only)
 const deleteRole = async (req, res) => {
-  try {
-    const { organizationId, roleId } = req.params;
-
-    if (!assertRoleRouteContext(req, organizationId)) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You are not a member of this organization.",
-      });
-    }
-
-    if (!req.authContext.permissions?.canManageRoles) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You do not have permission to manage roles.",
-      });
-    }
-
-    const existingRole = await prisma.role.findFirst({
-      where: {
-        id: roleId,
-        organizationId,
-      },
-      include: {
-        members: true,
-      },
-    });
-
-    if (!existingRole) {
-      return res.status(404).json({
-        success: false,
-        message: "Role not found",
-      });
-    }
-
-    if (existingRole.name === "owner") {
-      return res.status(400).json({
-        success: false,
-        message: "Cannot delete owner role",
-      });
-    }
-
-    if (existingRole.members.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Cannot delete role that has members. Please reassign members first.",
-      });
-    }
-
-    await prisma.role.delete({
-      where: { id: roleId },
-    });
-
-    res.json({
-      success: true,
-      message: "Role deleted successfully",
-    });
-  } catch (error) {
-    console.error("Error deleting role:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete role",
-      error: error.message,
-    });
-  }
+  return res.status(403).json({
+    success: false,
+    message:
+      "Custom role deletion is disabled for this release. Use seeded roles only.",
+  });
 };
 
 // Update member role
