@@ -32,11 +32,15 @@ const clerkWebhookRoute = require("./routes/clerk-webhook.route");
 const leadsApiRoute = require("./routes/leads-api.route");
 const leadsRoute = require("./routes/leads.route");
 const organizationRoute = require("./routes/organization.route");
+const paymentRoute = require("./routes/payment.route");
 const postbackRoute = require("./routes/postback.route");
 const roleRoute = require("./routes/role.route");
 const routeRoute = require("./routes/route.route");
 const sellerRoute = require("./routes/seller.route");
 const subscriptionRoute = require("./routes/subscription.route");
+const dodoRoute = require("./routes/dodo.route");
+const dodoPublicRoute = require("./routes/dodo-public.route");
+const dodoWebhookRoute = require("./routes/dodo-webhook.route");
 const userRoute = require("./routes/user.route");
 const webhookRoute = require("./routes/webhook.route");
 const webmasterRoute = require("./routes/webmaster.route");
@@ -52,6 +56,7 @@ const organizationContextOptional = authenticationContext({
 
 // clerk webhook route -> do not protect this route or move it to the end of the middleware chain
 app.use("/api/v1/clerk-webhook", clerkWebhookRoute);
+app.use("/api/v1/dodo/webhook", dodoWebhookRoute);
 
 app.use(
   pinoHttp({
@@ -74,6 +79,8 @@ app.use(express.urlencoded({ extended: true, limit: config.requestLimit }));
 app.use("/api/v1/leads", checkUserPlan, leadsApiRoute);
 app.use("/api/v1/postback", postbackRoute);
 app.use("/api/v1/subscription", subscriptionRoute);
+app.use("/api/v1/payment", paymentRoute);
+app.use("/api/v1/dodo-public", dodoPublicRoute);
 
 app.get("/", (req, res) => {
   res.send("server is running");
@@ -86,6 +93,7 @@ app.get("/unauthenticated", (req, res) => {
 app.use("/api/v1/user/create", addUser);
 app.use(clerkMiddleware());
 app.use("/api/v1/user", requireAuth(), userRoute);
+app.use("/api/v1/dodo", requireAuth(), dodoRoute);
 app.use(
   "/api/v1/routes",
   requireAuth(),

@@ -291,18 +291,27 @@ model Payment {
 
 model Subscription {
   id                     String             @id @default(uuid())
-  razorpayPaymentId      String
+  razorpayPaymentId      String?
   billingCycle           String
   plan                   String
   userId                 String?
   createdAt              DateTime           @default(now())
   endDate                DateTime
   isTrial                Boolean            @default(false)
-  razorpaySubscriptionId String             @unique
+  razorpaySubscriptionId String?            @unique
+  paymentProvider        String             @default("razorpay")
+  externalSubscriptionId String?            @unique
+  externalPaymentId      String?
+  externalCustomerId     String?
+  nextBillingDate        DateTime?
+  cancelAtNextBillingDate Boolean?
+  accessEndsAt           DateTime?
+  gracePeriodEnds        DateTime?
+  metadata               Json?
   startDate              DateTime           @default(now())
   status                 SubscriptionStatus @default(active)
   updatedAt              DateTime           @updatedAt
-  customerEmail          String
+  customerEmail          String?
   organizationId         String?
   organization           Organization?      @relation(fields: [organizationId], references: [id])
   user                   User?              @relation(fields: [userId], references: [id])
@@ -310,6 +319,17 @@ model Subscription {
   @@index([razorpaySubscriptionId])
   @@index([status])
   @@index([organizationId])
+  @@index([paymentProvider, externalSubscriptionId])
+}
+
+model ProcessedWebhookEvent {
+  id           String   @id
+  provider     String
+  eventType    String
+  receivedAt   DateTime @default(now())
+  payload      Json?
+
+  @@index([provider, eventType])
 }
 
 enum AccessType {
