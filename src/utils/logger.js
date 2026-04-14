@@ -11,7 +11,6 @@ const logger = pino({
       "req.body.password",
       "req.body.apiKey",
       "req.body.customer",
-      "razorpaySignature",
     ],
     remove: true,
   },

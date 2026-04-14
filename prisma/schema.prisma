@@ -291,15 +291,13 @@ model Payment {
 
 model Subscription {
   id                     String             @id @default(uuid())
-  razorpayPaymentId      String?
   billingCycle           String
   plan                   String
   userId                 String?
   createdAt              DateTime           @default(now())
   endDate                DateTime
   isTrial                Boolean            @default(false)
-  razorpaySubscriptionId String?            @unique
-  paymentProvider        String             @default("razorpay")
+  paymentProvider        String             @default("dodo")
   externalSubscriptionId String?            @unique
   externalPaymentId      String?
   externalCustomerId     String?
@@ -316,7 +314,6 @@ model Subscription {
   organization           Organization?      @relation(fields: [organizationId], references: [id])
   user                   User?              @relation(fields: [userId], references: [id])
 
-  @@index([razorpaySubscriptionId])
   @@index([status])
   @@index([organizationId])
   @@index([paymentProvider, externalSubscriptionId])

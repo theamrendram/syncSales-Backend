@@ -32,7 +32,6 @@ const clerkWebhookRoute = require("./routes/clerk-webhook.route");
 const leadsApiRoute = require("./routes/leads-api.route");
 const leadsRoute = require("./routes/leads.route");
 const organizationRoute = require("./routes/organization.route");
-const paymentRoute = require("./routes/payment.route");
 const postbackRoute = require("./routes/postback.route");
 const roleRoute = require("./routes/role.route");
 const routeRoute = require("./routes/route.route");
@@ -79,7 +78,6 @@ app.use(express.urlencoded({ extended: true, limit: config.requestLimit }));
 app.use("/api/v1/leads", checkUserPlan, leadsApiRoute);
 app.use("/api/v1/postback", postbackRoute);
 app.use("/api/v1/subscription", subscriptionRoute);
-app.use("/api/v1/payment", paymentRoute);
 app.use("/api/v1/dodo-public", dodoPublicRoute);
 
 app.get("/", (req, res) => {

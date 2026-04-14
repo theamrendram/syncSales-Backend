@@ -1,14 +1,6 @@
-const { clerkClient } = require("@clerk/express");
-const prismaClient = require("../utils/prismaClient");
-const { generateKey } = require("../utils/generate-key");
 const logger = require("../utils/logger");
 
 async function getSubscription(req, res) {
-  const body = req.body;
-  const { plan, razorpayPaymentId, razorpayOrderId,  } = req.body;
-  const { firstName, lastName, phone, email, password, company, address } =
-    body.customer;
-
   try {
     // const userExists = await prismaClient.user.findUnique({
     //   where: {
@@ -53,7 +45,7 @@ async function getSubscription(req, res) {
     //     apiKey: generateKey(),
     //   },
     // });
-    res.send("user");
+    res.send("subscription");
   } catch (error) {
     logger.error({ err: error }, "Failed in getSubscription");
     return res.status(500).json({ error: error });

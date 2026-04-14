@@ -187,8 +187,6 @@ async function handleDodoWebhook(req, res) {
           status: subscriptionStatus,
           customerEmail,
           metadata: data,
-          razorpayPaymentId: data.payment_id || null,
-          razorpaySubscriptionId: null,
         },
         update: {
           externalPaymentId: data.payment_id || null,
