@@ -1,4 +1,5 @@
 const prisma = require("../utils/prismaClient");
+const { DEFAULT_ORG_ROLES } = require("../utils/default-org-roles");
 
 // Create a new organization
 const createOrganization = async (req, res) => {
@@ -42,63 +43,8 @@ const createOrganization = async (req, res) => {
     });
 
     // Create default roles for the organization
-    const defaultRoles = [
-      {
-        name: "owner",
-        description: "Full access to all features",
-        permissions: {
-          canManageOrganization: true,
-          canManageMembers: true,
-          canManageRoles: true,
-          canViewAllData: true,
-          canEditAllData: true,
-          canDeleteData: true,
-          canManageBilling: true,
-        },
-      },
-      {
-        name: "admin",
-        description: "Administrative access",
-        permissions: {
-          canManageOrganization: false,
-          canManageMembers: true,
-          canManageRoles: false,
-          canViewAllData: true,
-          canEditAllData: true,
-          canDeleteData: true,
-          canManageBilling: false,
-        },
-      },
-      {
-        name: "manager",
-        description: "Manager access",
-        permissions: {
-          canManageOrganization: false,
-          canManageMembers: false,
-          canManageRoles: false,
-          canViewAllData: true,
-          canEditAllData: true,
-          canDeleteData: false,
-          canManageBilling: false,
-        },
-      },
-      {
-        name: "viewer",
-        description: "Read-only access",
-        permissions: {
-          canManageOrganization: false,
-          canManageMembers: false,
-          canManageRoles: false,
-          canViewAllData: true,
-          canEditAllData: false,
-          canDeleteData: false,
-          canManageBilling: false,
-        },
-      },
-    ];
-
     const roles = await Promise.all(
-      defaultRoles.map((role) =>
+      DEFAULT_ORG_ROLES.map((role) =>
         prisma.role.create({
           data: {
             ...role,

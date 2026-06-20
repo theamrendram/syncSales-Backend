@@ -1,5 +1,6 @@
 const prismaClient = require("../utils/prismaClient");
 const logger = require("../utils/logger");
+const { getRouteIdsForWebmaster } = require("../utils/webmaster-campaigns");
 
 const ROUTE_MUTABLE_FIELDS = [
   "name",
@@ -31,10 +32,26 @@ const getMissingRequiredFields = (body) =>
 const getRoutes = async (req, res) => {
   try {
     const take = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+    const ctx = req.authContext;
     const where = {
       organizationId: req.organizationId,
-      // deletedAt: null,
+      deletedAt: null,
     };
+
+    if (ctx?.isWebmaster) {
+      const routeIds = await getRouteIdsForWebmaster(
+        ctx.userId,
+        ctx.organizationId,
+      );
+      if (!routeIds.length) {
+        return res.status(200).json({
+          success: true,
+          data: [],
+          meta: { limit: take },
+        });
+      }
+      where.id = { in: routeIds };
+    }
 
     // Keep support for ?userId=... query shape while deriving filter from auth.
     if (req.query.userId !== undefined) {
@@ -116,10 +133,22 @@ const getRouteById = async (req, res) => {
   const { id } = req.params;
   console.log("[getRouteById] id: ", id)
   try {
+    const ctx = req.authContext;
+    if (ctx?.isWebmaster) {
+      const allowed = await getRouteIdsForWebmaster(
+        ctx.userId,
+        ctx.organizationId,
+      );
+      if (!allowed.includes(id)) {
+        return res.status(404).json({ success: false, error: "Route not found" });
+      }
+    }
+
     const route = await prismaClient.route.findFirst({
       where: {
         id,
         organizationId: req.organizationId,
+        deletedAt: null,
       },
     });
     if (!route) {

@@ -10,6 +10,17 @@ const PERMISSION_KEYS = [
   "canManageBilling",
 ];
 
+/** Fixed preset for users with WebmasterProfile (read-only; scope by campaign links). */
+const WEBMASTER_PERMISSIONS = {
+  canManageOrganization: false,
+  canManageMembers: false,
+  canManageRoles: false,
+  canViewAllData: true,
+  canEditAllData: false,
+  canDeleteData: false,
+  canManageBilling: false,
+};
+
 const rolePermissionsSchema = z.object(
   Object.fromEntries(PERMISSION_KEYS.map((k) => [k, z.boolean()]))
 );
@@ -24,6 +35,7 @@ function safeParseRolePermissions(input) {
 
 module.exports = {
   PERMISSION_KEYS,
+  WEBMASTER_PERMISSIONS,
   rolePermissionsSchema,
   parseRolePermissions,
   safeParseRolePermissions,

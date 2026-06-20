@@ -1,5 +1,6 @@
 const prismaClient = require("../utils/prismaClient");
 const logger = require("../utils/logger");
+const { getLeadScopeForWebmaster } = require("../utils/webmaster-campaigns");
 const {
   chartMetrics,
   generateExtendedReport,
@@ -20,15 +21,11 @@ const getChartData = async (req, res) => {
     let where = {};
 
     if (ctx?.isWebmaster) {
-      const assignedCampaigns = await prismaClient.campaign.findMany({
-        where: {
-          webmasterUserId: userId,
-          organizationId: ctx.organizationId,
-        },
-        select: { id: true },
-      });
-      const campaignIds = assignedCampaigns.map((c) => c.id);
-      if (!campaignIds.length) {
+      const { campaignIds, routeIds } = await getLeadScopeForWebmaster(
+        userId,
+        ctx.organizationId,
+      );
+      if (!campaignIds.length && !routeIds.length) {
         return res.json({
           newChartData: [],
           totalLeads: 0,
@@ -43,7 +40,10 @@ const getChartData = async (req, res) => {
 
       where = {
         organizationId: ctx.organizationId,
-        campaignId: { in: campaignIds },
+        OR: [
+          ...(campaignIds.length ? [{ campaignId: { in: campaignIds } }] : []),
+          ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
+        ],
         createdAt: { gte: startDate },
       };
     } else if (ctx?.organizationId) {
@@ -97,15 +97,11 @@ const getMetricData = async (req, res) => {
     let where = {};
 
     if (ctx?.isWebmaster) {
-      const assignedCampaigns = await prismaClient.campaign.findMany({
-        where: {
-          webmasterUserId: userId,
-          organizationId: ctx.organizationId,
-        },
-        select: { id: true },
-      });
-      const campaignIds = assignedCampaigns.map((c) => c.id);
-      if (!campaignIds.length) {
+      const { campaignIds, routeIds } = await getLeadScopeForWebmaster(
+        userId,
+        ctx.organizationId,
+      );
+      if (!campaignIds.length && !routeIds.length) {
         return res.json({
           todaysLeads: 0,
           yesterdaysLeads: 0,
@@ -120,7 +116,10 @@ const getMetricData = async (req, res) => {
 
       where = {
         organizationId: ctx.organizationId,
-        campaignId: { in: campaignIds },
+        OR: [
+          ...(campaignIds.length ? [{ campaignId: { in: campaignIds } }] : []),
+          ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
+        ],
         createdAt: { gte: startDate },
       };
     } else if (ctx?.organizationId) {

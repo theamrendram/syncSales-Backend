@@ -10,6 +10,9 @@ const {
 } = require("../utils/chart-functions");
 const logger = require("../utils/logger");
 const { Parser } = require("json2csv");
+const {
+  getLeadScopeForWebmaster,
+} = require("../utils/webmaster-campaigns");
 
 const MAX_PAGE_LIMIT = 100;
 const MAX_EXPORT_LIMIT = 1000;
@@ -56,27 +59,24 @@ const getUserWithMemberships = async (userId) =>
 
 const getLeadAccessWhereForUser = async (user, organizationId) => {
   if (user.webmasterProfile) {
-    // If org is not specified, allow access to all campaigns assigned to this webmaster
-    // across organizations (still constrained by campaign assignment).
-    const assignedCampaigns = await prismaClient.campaign.findMany({
-      where: {
-        webmasterUserId: user.id,
-        ...(organizationId ? { organizationId } : {}),
-      },
-      select: { id: true, organizationId: true },
-    });
-    const campaignIds = assignedCampaigns.map((c) => c.id);
-    if (!campaignIds.length) {
+    if (!organizationId) {
       return { where: null, isEmpty: true };
     }
-    if (organizationId) {
-      return {
-        where: { organizationId, campaignId: { in: campaignIds } },
-        isEmpty: false,
-      };
+    const { campaignIds, routeIds } = await getLeadScopeForWebmaster(
+      user.id,
+      organizationId,
+    );
+    if (!campaignIds.length && !routeIds.length) {
+      return { where: null, isEmpty: true };
     }
     return {
-      where: { campaignId: { in: campaignIds } },
+      where: {
+        organizationId,
+        OR: [
+          ...(campaignIds.length ? [{ campaignId: { in: campaignIds } }] : []),
+          ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
+        ],
+      },
       isEmpty: false,
     };
   }
@@ -166,15 +166,11 @@ const getLeads = async (req, res) => {
           message: "No organization context",
         });
       }
-      const assignedCampaigns = await prismaClient.campaign.findMany({
-        where: {
-          webmasterUserId: ctx.userId,
-          organizationId: ctx.organizationId,
-        },
-        select: { id: true },
-      });
-      const ids = assignedCampaigns.map((c) => c.id);
-      if (!ids.length) {
+      const { campaignIds: ids, routeIds } = await getLeadScopeForWebmaster(
+        ctx.userId,
+        ctx.organizationId,
+      );
+      if (!ids.length && !routeIds.length) {
         return res.json({
           leads: [],
           total: 0,
@@ -184,7 +180,10 @@ const getLeads = async (req, res) => {
       }
       scopeWhere = {
         organizationId: ctx.organizationId,
-        campaignId: { in: ids },
+        OR: [
+          ...(ids.length ? [{ campaignId: { in: ids } }] : []),
+          ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
+        ],
       };
     } else {
       if (!ctx.organizationId) {
@@ -320,19 +319,25 @@ const addLead = async (req, res) => {
             },
           },
         },
-        assignedWebmasterCampaigns: {
-          where: { campId },
+        webmasterCampaignMemberships: {
+          where: {
+            campaign: { campId },
+          },
           select: {
-            id: true,
-            routeId: true,
-            lead_period: true,
-            organizationId: true,
-            route: {
+            campaign: {
               select: {
-                url: true,
-                method: true,
-                attributes: true,
+                id: true,
+                routeId: true,
+                lead_period: true,
                 organizationId: true,
+                route: {
+                  select: {
+                    url: true,
+                    method: true,
+                    attributes: true,
+                    organizationId: true,
+                  },
+                },
               },
             },
           },
@@ -346,7 +351,7 @@ const addLead = async (req, res) => {
 
     const campaign =
       userWithCampaign.ownedCampaigns[0] ||
-      userWithCampaign.assignedWebmasterCampaigns[0];
+      userWithCampaign.webmasterCampaignMemberships[0]?.campaign;
     if (!campaign) {
       return res.status(400).json({ error: "Invalid campaign ID" });
     }
@@ -355,7 +360,7 @@ const addLead = async (req, res) => {
       if (!userWithCampaign.webmasterProfile.isActive) {
         return res.status(403).json({ error: "Webmaster account is inactive" });
       }
-      if (!userWithCampaign.assignedWebmasterCampaigns[0]) {
+      if (!userWithCampaign.webmasterCampaignMemberships[0]) {
         return res
           .status(403)
           .json({ error: "Access denied to this campaign" });
@@ -795,16 +800,18 @@ const getMonthlyLeadsByUser = async (req, res) => {
     thirtyDaysAgo.setDate(now.getDate() - 30);
 
     if (ctx?.isWebmaster) {
-      const assignedCampaigns = await prismaClient.campaign.findMany({
-        where: { webmasterUserId: userId, organizationId: ctx.organizationId },
-        select: { id: true },
-      });
-      const campaignIds = assignedCampaigns.map((c) => c.id);
-      if (!campaignIds.length) return res.json([]);
+      const { campaignIds, routeIds } = await getLeadScopeForWebmaster(
+        userId,
+        ctx.organizationId,
+      );
+      if (!campaignIds.length && !routeIds.length) return res.json([]);
 
       where = {
         organizationId: ctx.organizationId,
-        campaignId: { in: campaignIds },
+        OR: [
+          ...(campaignIds.length ? [{ campaignId: { in: campaignIds } }] : []),
+          ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
+        ],
         createdAt: {
           gte: thirtyDaysAgo,
           lte: now,
@@ -883,16 +890,18 @@ const getPastTenDaysLeadsByUser = async (req, res) => {
     const nowTime = new Date();
 
     if (ctx?.isWebmaster) {
-      const assignedCampaigns = await prismaClient.campaign.findMany({
-        where: { webmasterUserId: userId, organizationId: ctx.organizationId },
-        select: { id: true },
-      });
-      const campaignIds = assignedCampaigns.map((c) => c.id);
-      if (!campaignIds.length) return res.json([]);
+      const { campaignIds, routeIds } = await getLeadScopeForWebmaster(
+        userId,
+        ctx.organizationId,
+      );
+      if (!campaignIds.length && !routeIds.length) return res.json([]);
 
       where = {
         organizationId: ctx.organizationId,
-        campaignId: { in: campaignIds },
+        OR: [
+          ...(campaignIds.length ? [{ campaignId: { in: campaignIds } }] : []),
+          ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
+        ],
         createdAt: {
           gte: tenDaysAgo,
           lte: nowTime,

@@ -1,6 +1,9 @@
 const { validate: uuidValidate } = require("uuid");
 const prisma = require("../utils/prismaClient");
-const { PERMISSION_KEYS } = require("../utils/role-permissions-schema");
+const {
+  PERMISSION_KEYS,
+  WEBMASTER_PERMISSIONS,
+} = require("../utils/role-permissions-schema");
 
 const OWNER_FALLBACK_PERMISSIONS = {
   canManageOrganization: true,
@@ -98,16 +101,19 @@ async function buildAuthContextForOrg(userId, organizationId, isWebmaster) {
   }
 
   const role = membership?.role ?? null;
-  let permissions = role?.permissions
-    ? normalizePermissions(role.permissions)
-    : null;
+  let permissions = null;
 
-  if (isOwner && !permissions) {
-    permissions = { ...OWNER_FALLBACK_PERMISSIONS };
-  }
-
-  if (!isOwner && !permissions) {
-    return { error: "forbidden", status: 403 };
+  if (isOwner) {
+    permissions = role?.permissions
+      ? normalizePermissions(role.permissions)
+      : null;
+    if (!permissions) {
+      permissions = { ...OWNER_FALLBACK_PERMISSIONS };
+    }
+  } else if (isWebmaster && membership) {
+    permissions = normalizePermissions(WEBMASTER_PERMISSIONS);
+  } else if (role?.permissions) {
+    permissions = normalizePermissions(role.permissions);
   }
 
   if (!permissions || typeof permissions !== "object") {
