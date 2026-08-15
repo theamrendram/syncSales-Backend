@@ -8,6 +8,7 @@
     "dev": "nodemon server.js",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:generate": "prisma generate",
+    "postinstall": "prisma generate",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",

@@ -4,7 +4,6 @@ dotenv.config();
 const cors = require("cors");
 const pinoHttp = require("pino-http");
 const { clerkMiddleware, requireAuth } = require("@clerk/express");
-const { checkUserPlan } = require("./utils/check-user-plan");
 const { config } = require("./config/env");
 const logger = require("./utils/logger");
 const app = express();
@@ -71,7 +70,7 @@ app.use(cors());
 app.use(express.urlencoded({ extended: true, limit: config.requestLimit }));
 
 // leads api
-app.use("/api/v1/leads", checkUserPlan, leadsApiRoute);
+app.use("/api/v1/leads", leadsApiRoute);
 app.use("/api/v1/postback", postbackRoute);
 app.use("/api/v1/subscription", subscriptionRoute);
 
