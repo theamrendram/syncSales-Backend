@@ -2,15 +2,10 @@ const prismaClient = require("../utils/prismaClient");
 const logger = require("../utils/logger");
 const { getRouteIdsForWebmaster } = require("../utils/webmaster-campaigns");
 
-const ROUTE_MUTABLE_FIELDS = [
-  "name",
-  "product",
-  "description",
-  "payout",
-  "url",
-  "method",
-  "attributes",
-];
+const ROUTE_REQUIRED_FIELDS = ["name", "product", "description", "payout"];
+
+// The webhook fields (url, method, attributes) are deliberately not required:
+// a route can be created or updated without a webhook.
 
 const buildRoutePayload = (body) => {
   const payload = {
@@ -27,7 +22,7 @@ const buildRoutePayload = (body) => {
 };
 
 const getMissingRequiredFields = (body) =>
-  ROUTE_MUTABLE_FIELDS.filter((field) => body[field] === undefined);
+  ROUTE_REQUIRED_FIELDS.filter((field) => body[field] === undefined);
 
 const getRoutes = async (req, res) => {
   try {
