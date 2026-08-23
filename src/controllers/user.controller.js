@@ -158,9 +158,26 @@ const getUser = async (req, res) => {
       where: {
         id: userId,
       },
-      select: userSelect,
+      select: {
+        ...userSelect,
+        webmasterProfile: { select: { userId: true } },
+      },
     });
-    return res.status(200).json({ data: user });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const { webmasterProfile, ...userData } = user;
+
+    // Same discriminator as resolveIsWebmaster() in
+    // authentication-context.middleware.js: a WebmasterProfile is what makes a
+    // user a webmaster. Everyone else is an admin — self-serve signups have no
+    // organization or membership until they create one, so any check based on
+    // those would misclassify them.
+    return res.status(200).json({
+      data: { ...userData, role: webmasterProfile ? "webmaster" : "admin" },
+    });
   } catch (error) {
     console.error("Error in getUser:", error);
     return res
