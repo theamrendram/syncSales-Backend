@@ -1,11 +1,20 @@
 const prismaClient = require("../utils/prismaClient");
 const logger = require("../utils/logger");
-const { getLeadScopeForWebmaster } = require("../utils/webmaster-campaigns");
+const { resolveLeadScope } = require("../utils/lead-scope");
+const {
+  AGING_BUCKETS,
+  SUB_FIELDS,
+  getPendingAging,
+  getDeliveryHealth,
+  getSubBreakdown,
+} = require("../utils/lead-insights");
 const {
   chartMetrics,
   generateExtendedReport,
   getLeadsGroupedByDateRouteCampaign,
 } = require("../utils/chart-functions");
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const CHART_PARTS = ["metrics", "series", "report"];
 
@@ -44,44 +53,42 @@ const parseInclude = (raw) => {
 const loadScopedLeads = async (req) => {
   const limit = Math.min(Math.max(Number(req.query.limit) || 2000, 100), 5000);
   const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 90);
-  const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-  const { userId } = req.auth;
-  const ctx = req.authContext;
 
-  if (!userId) {
-    return { ok: false, status: 400, error: "User ID not found" };
+  /**
+   * How far back the window *ends*, in days. Zero — the default, and what every
+   * caller written before this sent — ends at now and preserves the original
+   * open-ended `gte` filter exactly.
+   *
+   * A non-zero offset slides the same `days`-wide window into the past so the
+   * report can ask for the period preceding the one on screen. Fetching one
+   * double-width window and splitting it client-side would have been simpler,
+   * but `take: limit` keeps the *newest* rows, so a truncated double window
+   * silently drops the older half — inflating every period-over-period delta.
+   * Two independently-bounded requests each report their own truncation.
+   */
+  const offsetDays = Math.min(Math.max(Number(req.query.offsetDays) || 0, 0), 365);
+
+  const now = Date.now();
+  const endDate = offsetDays > 0 ? new Date(now - offsetDays * DAY_MS) : null;
+  const startDate = new Date(
+    (endDate ? endDate.getTime() : now) - days * DAY_MS,
+  );
+
+  const scope = await resolveLeadScope(req);
+  if (!scope.ok) return scope;
+
+  if (scope.empty) {
+    return { ok: true, leads: [], days, limit, offsetDays };
   }
 
-  let where;
-
-  if (ctx?.isWebmaster) {
-    const { campaignIds, routeIds } = await getLeadScopeForWebmaster(
-      userId,
-      ctx.organizationId,
-    );
-
-    if (!campaignIds.length && !routeIds.length) {
-      return { ok: true, leads: [], days, limit };
-    }
-    where = {
-      organizationId: ctx.organizationId,
-      OR: [
-        ...(campaignIds.length ? [{ campaignId: { in: campaignIds } }] : []),
-        ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
-      ],
-      createdAt: { gte: startDate },
-    };
-  } else if (ctx?.organizationId) {
-    where = {
-      organizationId: ctx.organizationId,
-      createdAt: { gte: startDate },
-    };
-  } else {
-    return { ok: false, status: 403, error: "Unauthorized" };
-  }
+  // `lt` only appears for a past window; the live window stays open-ended so a
+  // lead written between the timestamp and the query still lands in it.
+  const createdAt = endDate
+    ? { gte: startDate, lt: endDate }
+    : { gte: startDate };
 
   const leads = await prismaClient.lead.findMany({
-    where,
+    where: { ...scope.where, createdAt },
     include: {
       campaign: { select: { name: true, campId: true } },
       route: { select: { payout: true, name: true, routeId: true } },
@@ -90,8 +97,23 @@ const loadScopedLeads = async (req) => {
     take: limit,
   });
 
-  return { ok: true, leads, days, limit };
+  return { ok: true, leads, days, limit, offsetDays };
 };
+
+/**
+ * Response metadata for a loaded window.
+ *
+ * `truncated` is the one signal a caller has that it is looking at a partial
+ * window: `take: limit` keeps the newest rows, so hitting the cap means older
+ * leads were dropped and every aggregate over them understates the past.
+ */
+const buildMeta = ({ days, limit, offsetDays, leads }) => ({
+  days,
+  limit,
+  offsetDays,
+  returned: leads.length,
+  truncated: leads.length >= limit,
+});
 
 const getChartData = async (req, res) => {
   try {
@@ -100,16 +122,16 @@ const getChartData = async (req, res) => {
       return res.status(scope.status).json({ error: scope.error });
     }
 
-    const { leads, days, limit } = scope;
+    const { leads } = scope;
     const parts = parseInclude(req.query.include);
 
     const responseData = {
       totalLeads: leads.length,
-      meta: { days, limit, returned: leads.length },
+      meta: buildMeta(scope),
     };
 
     if (parts.has("metrics")) {
-      responseData.metricData = chartMetrics(leads);
+      responseData.metricData = chartMetrics(leads, { days: scope.days });
     }
 
     if (parts.has("series")) {
@@ -138,11 +160,11 @@ const getMetricData = async (req, res) => {
       return res.status(scope.status).json({ error: scope.error });
     }
 
-    const { leads, days, limit } = scope;
+    const { leads } = scope;
 
     return res.status(200).json({
-      metricData: chartMetrics(leads),
-      meta: { days, limit, returned: leads.length },
+      metricData: chartMetrics(leads, { days: scope.days }),
+      meta: buildMeta(scope),
     });
   } catch (error) {
     logger.error({ err: error }, "Error getting metric data");
@@ -153,7 +175,107 @@ const getMetricData = async (req, res) => {
   }
 };
 
+/**
+ * Operational health: what is stuck, and what never arrived.
+ *
+ * Kept off `/chart` because the two halves answer questions the report window
+ * cannot. Pending aging looks at every outstanding lead regardless of date —
+ * the interesting ones are precisely those too old to appear in a window — while
+ * delivery failures are windowed like the rest of the report.
+ */
+const getLeadHealth = async (req, res) => {
+  try {
+    const scope = await resolveLeadScope(req);
+    if (!scope.ok) {
+      return res.status(scope.status).json({ error: scope.error });
+    }
+
+    if (scope.empty) {
+      return res.status(200).json({
+        pendingAging: [],
+        deliveryHealth: [],
+        buckets: AGING_BUCKETS,
+        meta: { days: 0 },
+      });
+    }
+
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 90);
+    const startDate = new Date(Date.now() - days * DAY_MS);
+
+    const [pendingAging, deliveryHealth] = await Promise.all([
+      getPendingAging(scope),
+      getDeliveryHealth({ where: scope.where, startDate }),
+    ]);
+
+    return res.status(200).json({
+      pendingAging,
+      deliveryHealth,
+      buckets: AGING_BUCKETS,
+      meta: { days },
+    });
+  } catch (error) {
+    logger.error({ err: error }, "Error getting lead health");
+    res.status(500).json({
+      error: "Unable to get lead health",
+      details: error.message,
+    });
+  }
+};
+
+/**
+ * Quality of the highest-volume values on one sub-ID field.
+ *
+ * `field` is validated against a fixed list rather than interpolated: it names
+ * a database column, and the only safe way to accept a column name from a query
+ * string is to refuse anything not on the list.
+ */
+const getSubIdBreakdown = async (req, res) => {
+  try {
+    const field = String(req.query.field || "sub1");
+
+    if (!SUB_FIELDS.includes(field)) {
+      return res.status(400).json({
+        error: "Invalid sub field",
+        valid_fields: SUB_FIELDS,
+      });
+    }
+
+    const scope = await resolveLeadScope(req);
+    if (!scope.ok) {
+      return res.status(scope.status).json({ error: scope.error });
+    }
+
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 90);
+
+    if (scope.empty) {
+      return res
+        .status(200)
+        .json({ field, values: [], truncated: false, meta: { days } });
+    }
+
+    const startDate = new Date(Date.now() - days * DAY_MS);
+    const routeId = req.query.routeId ? String(req.query.routeId) : undefined;
+
+    const breakdown = await getSubBreakdown({
+      where: scope.where,
+      startDate,
+      field,
+      routeId,
+    });
+
+    return res.status(200).json({ ...breakdown, meta: { days } });
+  } catch (error) {
+    logger.error({ err: error }, "Error getting sub ID breakdown");
+    res.status(500).json({
+      error: "Unable to get sub ID breakdown",
+      details: error.message,
+    });
+  }
+};
+
 module.exports = {
   getChartData,
   getMetricData,
+  getLeadHealth,
+  getSubIdBreakdown,
 };

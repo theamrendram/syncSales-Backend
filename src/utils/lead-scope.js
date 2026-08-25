@@ -1,0 +1,62 @@
+const { getLeadScopeForWebmaster } = require("./webmaster-campaigns");
+
+/**
+ * The set of leads a caller is allowed to see, as a reusable Prisma `where`
+ * fragment carrying no date filter of its own.
+ *
+ * Extracted so the chart, health and sub-ID endpoints cannot drift apart on who
+ * sees what. A webmaster is scoped to their assigned campaigns and routes; a
+ * regular member to their organization. Every endpoint spreads this and adds
+ * its own `createdAt`.
+ *
+ * Returns one of:
+ *   { ok: false, status, error }  — forward verbatim
+ *   { ok: true, empty: true }     — a webmaster assigned nothing; no query
+ *                                   should run, and every aggregate is empty
+ *   { ok: true, empty: false, where, organizationId }
+ */
+const resolveLeadScope = async (req) => {
+  const { userId } = req.auth ?? {};
+  const ctx = req.authContext;
+
+  if (!userId) {
+    return { ok: false, status: 400, error: "User ID not found" };
+  }
+
+  if (ctx?.isWebmaster) {
+    const { campaignIds, routeIds } = await getLeadScopeForWebmaster(
+      userId,
+      ctx.organizationId,
+    );
+
+    if (!campaignIds.length && !routeIds.length) {
+      return { ok: true, empty: true, organizationId: ctx.organizationId };
+    }
+
+    return {
+      ok: true,
+      empty: false,
+      organizationId: ctx.organizationId,
+      where: {
+        organizationId: ctx.organizationId,
+        OR: [
+          ...(campaignIds.length ? [{ campaignId: { in: campaignIds } }] : []),
+          ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
+        ],
+      },
+    };
+  }
+
+  if (ctx?.organizationId) {
+    return {
+      ok: true,
+      empty: false,
+      organizationId: ctx.organizationId,
+      where: { organizationId: ctx.organizationId },
+    };
+  }
+
+  return { ok: false, status: 403, error: "Unauthorized" };
+};
+
+module.exports = { resolveLeadScope };
