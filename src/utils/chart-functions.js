@@ -31,7 +31,49 @@ const getISTDateString = (dateInput) => {
   return date.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 };
 
-const chartMetrics = (leads) => {
+/**
+ * A period's leads and what they are worth, on both bases.
+ *
+ * `submitted` prices every lead at its route's payout; `earned` counts only the
+ * ones the client approved. Keeping both is the whole point — a lead is not
+ * money until the buyer says so, and reporting one number for both was how the
+ * dashboard came to overstate revenue by everything its clients rejected.
+ */
+const emptyPeriod = () => ({ leads: 0, earned: 0, submitted: 0 });
+
+const addToPeriod = (period, payout, isApproved) => {
+  period.leads += 1;
+  period.submitted += payout;
+  if (isApproved) period.earned += payout;
+};
+
+const round2 = (value) => Math.round(value * 100) / 100;
+
+/**
+ * Percentage change, or null when there is no baseline to divide by.
+ *
+ * Returning 100 for "grew from nothing", as this used to, invents a baseline
+ * that never existed and renders as a confident green +100% on the dashboard.
+ * Null lets the card omit the badge instead.
+ */
+const calcTrend = (current, previous) => {
+  if (previous === 0) return current === 0 ? 0 : null;
+  return Math.round(((current - previous) / previous) * 100);
+};
+
+/**
+ * Month-scale buckets are only as complete as the loaded window.
+ *
+ * The caller passes a `days` window (30 by default, 90 at most) and this then
+ * reports on "last month" — which a 30-day window cannot cover. Rather than
+ * present a partial count as a total, the flags below tell the UI what it is
+ * allowed to trust. Fixing this properly means aggregating months in the
+ * database rather than over a capped page of leads.
+ */
+const MIN_DAYS_FOR_LAST_MONTH = 62;
+const MIN_DAYS_FOR_MONTH_TREND = 92;
+
+const chartMetrics = (leads, { days = 30 } = {}) => {
   const now = new Date();
   const todayStr = getISTDateString(now);
   
@@ -53,17 +95,28 @@ const chartMetrics = (leads) => {
   const lastDayLastMonth = new Date(firstDayThisMonth.getTime() - 1);
   const prevMonthYearStr = lastDayLastMonth.toISOString().slice(0, 7); // YYYY-MM
 
-  // Buckets
-  let todaysLeads = 0,
-    yesterdaysLeads = 0,
-    twoDaysAgoLeads = 0,
-    lastMonthLeads = 0,
-    todaysRevenue = 0,
-    yesterdaysRevenue = 0,
-    twoDaysAgoRevenue = 0,
-    lastMonthRevenue = 0,
-    totalRevenue = 0,
-    approvedLeads = 0;
+  // The month before that, so "last month" has something real to move against.
+  const firstDayLastMonth = new Date(
+    lastDayLastMonth.getFullYear(),
+    lastDayLastMonth.getMonth(),
+    1,
+  );
+  const twoMonthsAgoStr = new Date(firstDayLastMonth.getTime() - 1)
+    .toISOString()
+    .slice(0, 7);
+
+  const today = emptyPeriod();
+  const yesterday = emptyPeriod();
+  const twoDaysAgo = emptyPeriod();
+  const lastMonth = emptyPeriod();
+  const twoMonthsAgo = emptyPeriod();
+  const overall = emptyPeriod();
+
+  let approvedLeads = 0,
+    trashLeads = 0,
+    duplicateLeads = 0,
+    pendingLeads = 0,
+    pipelineRevenue = 0;
 
   const campaignStats = {};
   const pieChartMap = {};
@@ -83,43 +136,59 @@ const chartMetrics = (leads) => {
         ? lead.route.payout
         : 0;
 
-    totalRevenue += payout;
+    // Matched case-insensitively: the postback handler title-cases whatever
+    // string the client sent, so `APPROVED` is stored as `APPROVED`.
+    const status = String(lead.status ?? "").toLowerCase();
+    const isApproved = status === "approved";
 
-    if (lead.status?.toLowerCase() === "approved") {
-      approvedLeads++;
+    if (isApproved) approvedLeads++;
+    else if (status === "trash") trashLeads++;
+    else if (status === "duplicate") duplicateLeads++;
+    else if (status === "pending") {
+      pendingLeads++;
+      pipelineRevenue += payout;
     }
+
+    addToPeriod(overall, payout, isApproved);
 
     // Today
     if (leadISTStr === todayStr) {
-      todaysLeads++;
-      todaysRevenue += payout;
+      addToPeriod(today, payout, isApproved);
     }
     // Yesterday
     else if (leadISTStr === yesterdayStr) {
-      yesterdaysLeads++;
-      yesterdaysRevenue += payout;
+      addToPeriod(yesterday, payout, isApproved);
     }
     // Two days ago
     else if (leadISTStr === twoDaysAgoStr) {
-      twoDaysAgoLeads++;
-      twoDaysAgoRevenue += payout;
+      addToPeriod(twoDaysAgo, payout, isApproved);
     }
 
     // Last month
     // Check if lead's month matches last month
     const leadMonthStr = leadISTStr.slice(0, 7);
     if (leadMonthStr === prevMonthYearStr) {
-      lastMonthLeads++;
-      lastMonthRevenue += payout;
+      addToPeriod(lastMonth, payout, isApproved);
+    } else if (leadMonthStr === twoMonthsAgoStr) {
+      addToPeriod(twoMonthsAgo, payout, isApproved);
     }
 
     // Campaign stats (all-time)
     const campaignName = lead.campaign?.name || "Unknown";
     if (!campaignStats[campaignName]) {
-      campaignStats[campaignName] = { leads: 0, revenue: 0 };
+      campaignStats[campaignName] = {
+        leads: 0,
+        revenue: 0,
+        submittedRevenue: 0,
+        approved: 0,
+      };
     }
     campaignStats[campaignName].leads++;
-    campaignStats[campaignName].revenue += payout;
+    campaignStats[campaignName].submittedRevenue += payout;
+    if (isApproved) {
+      campaignStats[campaignName].approved++;
+      campaignStats[campaignName].revenue += payout;
+    }
 
     // Pie chart (this month only - IST)
     if (leadMonthStr === currentMonthYearStr) {
@@ -135,45 +204,88 @@ const chartMetrics = (leads) => {
     }
   }
 
-  // Helper for signed trends
-  const calcTrend = (current, previous) => {
-    if (previous === 0) return current > 0 ? 100 : 0;
-    return Math.round(((current - previous) / previous) * 100);
-  };
-
   // Finalize
   const totalLeads = leads.length;
-  const conversionRate =
-    totalLeads > 0 ? Math.round((approvedLeads / totalLeads) * 10000) / 100 : 0;
 
+  /**
+   * Approved over the leads a client has actually ruled on.
+   *
+   * Pending is excluded from the denominator, matching `/reports/statistics`.
+   * The old formula divided by every lead, so a healthy client with a backlog
+   * of undecided leads read as a rejection problem it did not have.
+   */
+  const decidedLeads = totalLeads - pendingLeads;
+  const approvalRate =
+    decidedLeads > 0 ? round2((approvedLeads / decidedLeads) * 100) : 0;
+
+  /** Earned per lead sent — what a lead is actually worth end to end. */
   const averageRevenuePerLead =
-    totalLeads > 0 ? Math.round((totalRevenue / totalLeads) * 100) / 100 : 0;
+    totalLeads > 0 ? round2(overall.earned / totalLeads) : 0;
 
   const topCampaigns = Object.entries(campaignStats)
-    .map(([name, stats]) => ({ name, ...stats }))
+    .map(([name, stats]) => ({
+      name,
+      ...stats,
+      revenue: round2(stats.revenue),
+      submittedRevenue: round2(stats.submittedRevenue),
+    }))
     .sort((a, b) => b.leads - a.leads)
     .slice(0, 5);
 
   const pieChartData = Object.values(pieChartMap);
 
+  const lastMonthComplete = days >= MIN_DAYS_FOR_LAST_MONTH;
+  const monthTrendAvailable = days >= MIN_DAYS_FOR_MONTH_TREND;
+
   return {
     // Base metrics
-    todaysLeads,
-    yesterdaysLeads,
-    todaysExpectedRevenue: todaysRevenue,
-    lastMonthLeads,
-    lastMonthRevenue,
-    totalRevenue: Math.round(totalRevenue * 100) / 100,
+    todaysLeads: today.leads,
+    yesterdaysLeads: yesterday.leads,
+    /** Every lead today at its payout — most are still pending, hence "expected". */
+    todaysExpectedRevenue: round2(today.submitted),
+    /** Of that, what clients have already approved. */
+    todaysEarnedRevenue: round2(today.earned),
+    lastMonthLeads: lastMonth.leads,
+    lastMonthRevenue: round2(lastMonth.earned),
+    lastMonthSubmittedRevenue: round2(lastMonth.submitted),
+
+    /** Approved leads only. What the organization is actually owed. */
+    totalRevenue: round2(overall.earned),
+    /** Every lead sent at its payout, approved or not. */
+    totalSubmittedRevenue: round2(overall.submitted),
+    /** Riding on leads no client has ruled on yet. */
+    pipelineRevenue: round2(pipelineRevenue),
+
     totalLeads,
-    conversionRate,
+    approvedLeads,
+    trashLeads,
+    duplicateLeads,
+    pendingLeads,
+    decidedLeads,
+    approvalRate,
     averageRevenuePerLead,
 
-    // Trends (signed %)
+    // Trends (signed %, or null where there is no baseline)
     trends: {
-      todayLeads: calcTrend(todaysLeads, yesterdaysLeads),
-      todayRevenue: calcTrend(todaysRevenue, yesterdaysRevenue),
-      yesterday: calcTrend(yesterdaysLeads, twoDaysAgoLeads),
-      lastMonth: calcTrend(lastMonthLeads, 0), // optional: compare with previous month
+      todayLeads: calcTrend(today.leads, yesterday.leads),
+      // Tracks the figure the card displays, which is the expected basis.
+      todayRevenue: calcTrend(today.submitted, yesterday.submitted),
+      yesterday: calcTrend(yesterday.leads, twoDaysAgo.leads),
+      // Was compared against a hard-coded 0, so it always read +100%.
+      lastMonth: monthTrendAvailable
+        ? calcTrend(lastMonth.leads, twoMonthsAgo.leads)
+        : null,
+    },
+
+    /**
+     * What the loaded window can support. Month-scale figures computed from a
+     * 30-day window are partial, and the UI needs to say so rather than
+     * present them as totals.
+     */
+    coverage: {
+      windowDays: days,
+      lastMonthComplete,
+      monthTrendAvailable,
     },
 
     // Campaign data
@@ -182,6 +294,22 @@ const chartMetrics = (leads) => {
   };
 };
 
+/**
+ * Per (date, route, campaign) rollup of the lead window.
+ *
+ * A lead's status is the client's verdict, posted back to `/api/v1/postback`,
+ * so it is the axis every honest revenue figure hangs off. This emits two
+ * rather than one:
+ *
+ *   submittedRevenue — every lead sent, at the route's payout. What the old
+ *                      single `revenue` field counted; a lead is only worth
+ *                      this much if the client goes on to accept it.
+ *   earnedRevenue    — approved leads only. The money actually owed.
+ *
+ * Statuses are matched case-insensitively. The postback handler title-cases
+ * the caller's raw string rather than a normalized one, so a client posting
+ * `APPROVED` stores `APPROVED`, not `Approved` — an exact match would drop it.
+ */
 const generateExtendedReport = (leads) => {
   const reportMap = new Map();
 
@@ -205,23 +333,38 @@ const generateExtendedReport = (leads) => {
         routeId,
         campaign,
         campId,
+        // Constant across the group: payout lives on the route, and every lead
+        // here shares one.
+        payout,
         leads: 0,
-        revenue: 0,
+        approved: 0,
+        trash: 0,
         duplicates: 0,
         pending: 0,
+        earnedRevenue: 0,
+        submittedRevenue: 0,
       });
     }
 
     const reportItem = reportMap.get(key);
     reportItem.leads += 1;
+    reportItem.submittedRevenue += payout;
 
-    if (lead.status === "Duplicate") {
-      reportItem.duplicates += 1;
-    } else if (lead.status === "Pending") {
-      reportItem.pending += 1;
+    switch (lead.status?.toLowerCase()) {
+      case "approved":
+        reportItem.approved += 1;
+        reportItem.earnedRevenue += payout;
+        break;
+      case "trash":
+        reportItem.trash += 1;
+        break;
+      case "duplicate":
+        reportItem.duplicates += 1;
+        break;
+      case "pending":
+        reportItem.pending += 1;
+        break;
     }
-
-    reportItem.revenue += payout;
   });
 
   return Array.from(reportMap.values());
