@@ -1,6 +1,6 @@
 const prismaClient = require("../utils/prismaClient");
 
-const checkDuplicateLead = async (phone, campaign) => {
+const checkDuplicateLead = async (phone, campaign, timer) => {
   const lead_period = campaign.lead_period;
 
   const whereClause = {
@@ -16,12 +16,14 @@ const checkDuplicateLead = async (phone, campaign) => {
     };
   }
 
+  timer?.time("db:lead.findFirst(duplicate)");
   const lead = await prismaClient.lead.findFirst({
     where: whereClause,
     select: {
       id: true,
     },
   });
+  timer?.timeEnd("db:lead.findFirst(duplicate)");
 
   return !!lead;
 };

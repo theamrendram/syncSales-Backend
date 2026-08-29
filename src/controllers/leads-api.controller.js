@@ -12,43 +12,99 @@ const leadModelHasOrgLeadId =
   );
 
 // ----- START utility functions ------
-const createLead = async (leadData, usageUserId, organizationId) => {
+// Columns written from leadData, in a fixed order. "date"/"createdAt" are left
+// to their DB defaults; "id"/"updatedAt" have none, so they are supplied here.
+const LEAD_INSERT_COLUMNS = [
+  "firstName",
+  "lastName",
+  "phone",
+  "email",
+  "address",
+  "status",
+  "sub1",
+  "sub2",
+  "sub3",
+  "sub4",
+  "campaignId",
+  "routeId",
+  "userId",
+  "ip",
+  "country",
+];
+
+// One statement instead of an interactive transaction: BEGIN/COMMIT alone cost
+// two network round trips, and each nested query cost another. A single
+// data-modifying CTE is still atomic and runs in one round trip.
+const createLead = async (leadData, usageUserId, organizationId, timer) => {
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
 
-  // Use transaction for atomicity and upsert for leadUsage to prevent failures
-  return await prismaClient.$transaction(async (tx) => {
-    const counterRows = await tx.$queryRaw`
+  const params = [];
+  const bind = (value, cast) => {
+    params.push(value);
+    return `$${params.length}::${cast}`;
+  };
+
+  const orgIdParam = bind(organizationId, "text");
+
+  // Usage tracking must never block lead creation. Folding it into this
+  // statement makes it atomic, so it is only included when it cannot fail on a
+  // NOT NULL violation.
+  const usageCte = usageUserId
+    ? `, usage AS (
+      INSERT INTO "LeadUsage" ("id", "userId", "date", "count", "organizationId")
+      VALUES (${bind(randomUUID(), "text")}, ${bind(usageUserId, "text")}, ${bind(
+        today,
+        "timestamp(3)",
+      )}, 1, ${orgIdParam})
+      ON CONFLICT ("userId", "date")
+      DO UPDATE SET "count" = "LeadUsage"."count" + 1
+    )`
+    : "";
+
+  const idParam = bind(randomUUID(), "text");
+  const leadValueParams = LEAD_INSERT_COLUMNS.map((column) =>
+    bind(leadData[column] ?? null, "text"),
+  );
+  const updatedAtParam = bind(new Date(), "timestamp(3)");
+
+  const columns = [
+    "id",
+    ...LEAD_INSERT_COLUMNS,
+    "organizationId",
+    "updatedAt",
+    ...(leadModelHasOrgLeadId ? ["orgLeadId"] : []),
+  ]
+    .map((column) => `"${column}"`)
+    .join(", ");
+
+  const values = [
+    idParam,
+    ...leadValueParams,
+    orgIdParam,
+    updatedAtParam,
+    ...(leadModelHasOrgLeadId ? ['counter."nextValue"'] : []),
+  ].join(", ");
+
+  const sql = `
+    WITH counter AS (
       INSERT INTO "OrgLeadCounter" ("organizationId", "nextValue")
-      VALUES (${organizationId}, 1)
+      VALUES (${orgIdParam}, 1)
       ON CONFLICT ("organizationId")
       DO UPDATE SET "nextValue" = "OrgLeadCounter"."nextValue" + 1
-      RETURNING "nextValue";
-    `;
-    const orgLeadId = Number(counterRows?.[0]?.nextValue || 1);
+      RETURNING "nextValue"
+    )${usageCte}
+    INSERT INTO "Lead" (${columns})
+    SELECT ${values} FROM counter
+    RETURNING *;
+  `;
 
-    const lead = await tx.lead.create({
-      data: {
-        ...leadData,
-        organizationId,
-        ...(leadModelHasOrgLeadId ? { orgLeadId } : {}),
-      },
-    });
+  // RETURNING * because sendWebhook maps arbitrary lead fields into the payload.
+  timer?.time("db:createLead (single statement)");
+  const rows = await prismaClient.$queryRawUnsafe(sql, ...params);
+  timer?.timeEnd("db:createLead (single statement)");
 
-    try {
-      await tx.$executeRaw`
-        INSERT INTO "LeadUsage" ("id", "userId", "date", "count")
-        VALUES (${randomUUID()}, ${usageUserId}, ${today}, 1)
-        ON CONFLICT ("userId", "date")
-        DO UPDATE SET "count" = "LeadUsage"."count" + 1;
-      `;
-    } catch (usageError) {
-      // Usage tracking should never block lead creation in production.
-      console.error("Lead usage update failed:", usageError.message);
-    }
-
-    return lead;
-  });
+  return rows[0];
 };
 
 // Extract webhook handling to reduce duplication
@@ -85,11 +141,13 @@ const handleDuplicateLead = async (
   principalWithCampaign,
   organizationId,
   res,
+  timer,
 ) => {
   const duplicateLead = await createLead(
     { ...leadData, status: "Duplicate" },
     principalWithCampaign.usageUserId,
     organizationId,
+    timer,
   );
 
   // Send response immediately, handle webhook asynchronously
@@ -112,11 +170,13 @@ const handleNewLead = async (
   principalWithCampaign,
   organizationId,
   res,
+  timer,
 ) => {
   const lead = await createLead(
     leadData,
     principalWithCampaign.usageUserId,
     organizationId,
+    timer,
   );
 
   // Send response immediately, handle webhook asynchronously
@@ -135,14 +195,28 @@ const handleNewLead = async (
   });
 };
 
-const getPrincipalWithCampaign = async (apiKey, campId) => {
-  const principal = await resolveApiKeyPrincipal(apiKey);
+const getPrincipalWithCampaign = async (
+  apiKey,
+  campId,
+  timer,
+  cachedPrincipal,
+) => {
+  // checkUserPlan already resolved this exact API key; reuse it instead of
+  // paying the lookup twice.
+  const normalizedApiKey =
+    typeof apiKey === "string" ? apiKey.trim() : null;
+  const principal =
+    cachedPrincipal && normalizedApiKey && cachedPrincipal.apiKey === normalizedApiKey
+      ? cachedPrincipal
+      : await resolveApiKeyPrincipal(apiKey, timer);
   if (!principal) {
     return null;
   }
 
   if (principal.type === "user") {
+    timer?.time("db:user.findUnique(+ownedCampaigns)");
     const userWithCampaign = await prismaClient.user.findUnique({
+      relationLoadStrategy: "join",
       where: { apiKey: principal.apiKey },
       select: {
         id: true,
@@ -166,6 +240,7 @@ const getPrincipalWithCampaign = async (apiKey, campId) => {
         },
       },
     });
+    timer?.timeEnd("db:user.findUnique(+ownedCampaigns)");
 
     if (!userWithCampaign) {
       return null;
@@ -179,7 +254,9 @@ const getPrincipalWithCampaign = async (apiKey, campId) => {
     };
   }
 
+  timer?.time("db:campaign.findFirst");
   const campaign = await prismaClient.campaign.findFirst({
+    relationLoadStrategy: "join",
     where: {
       campId,
       organizationId: principal.organizationId || undefined,
@@ -203,6 +280,7 @@ const getPrincipalWithCampaign = async (apiKey, campId) => {
       },
     },
   });
+  timer?.timeEnd("db:campaign.findFirst");
 
   return {
     ...principal,
@@ -214,7 +292,11 @@ const getPrincipalWithCampaign = async (apiKey, campId) => {
   };
 };
 
-const resolveLeadOrganizationId = async (principalWithCampaign, campaign) => {
+const resolveLeadOrganizationId = async (
+  principalWithCampaign,
+  campaign,
+  timer,
+) => {
   const campaignOrganizationId =
     campaign?.organizationId ?? campaign?.route?.organizationId ?? null;
   if (campaignOrganizationId) {
@@ -229,6 +311,7 @@ const resolveLeadOrganizationId = async (principalWithCampaign, campaign) => {
     return null;
   }
 
+  timer?.time("db:organizationMember.findFirst");
   const membership = await prismaClient.organizationMember.findFirst({
     where: {
       userId: principalWithCampaign.id,
@@ -241,6 +324,7 @@ const resolveLeadOrganizationId = async (principalWithCampaign, campaign) => {
       joinedAt: "asc",
     },
   });
+  timer?.timeEnd("db:organizationMember.findFirst");
 
   return membership?.organizationId ?? null;
 };
@@ -248,6 +332,8 @@ const resolveLeadOrganizationId = async (principalWithCampaign, campaign) => {
 
 // Extract common lead processing logic
 const processLeadRequest = async (req, res, source) => {
+  const timer = req.timer;
+  timer?.time("handler:addLead");
   const data = source === "body" ? req.body : req.query;
   const {
     name,
@@ -283,10 +369,14 @@ const processLeadRequest = async (req, res, source) => {
   }
 
   try {
+    timer?.time("step:getPrincipalWithCampaign");
     const principalWithCampaign = await getPrincipalWithCampaign(
       apiKey,
       campId,
+      timer,
+      req.principal,
     );
+    timer?.timeEnd("step:getPrincipalWithCampaign");
     if (!principalWithCampaign) {
       return res.status(400).json({ error: "Invalid API key" });
     }
@@ -308,10 +398,13 @@ const processLeadRequest = async (req, res, source) => {
       return res.status(400).json({ error: "Invalid campaign ID" });
     }
 
+    timer?.time("step:resolveLeadOrganizationId");
     const organizationId = await resolveLeadOrganizationId(
       principalWithCampaign,
       campaign,
+      timer,
     );
+    timer?.timeEnd("step:resolveLeadOrganizationId");
     if (!organizationId) {
       return res.status(400).json({
         error:
@@ -328,7 +421,13 @@ const processLeadRequest = async (req, res, source) => {
       });
     }
 
-    const isDuplicate = await checkDuplicateLead(sanitizedPhone, campaign);
+    timer?.time("step:checkDuplicateLead");
+    const isDuplicate = await checkDuplicateLead(
+      sanitizedPhone,
+      campaign,
+      timer,
+    );
+    timer?.timeEnd("step:checkDuplicateLead");
     const leadData = {
       firstName: firstName.trim(),
       lastName: lastName?.trim() || null,
@@ -348,21 +447,32 @@ const processLeadRequest = async (req, res, source) => {
     };
 
     if (isDuplicate) {
-      return await handleDuplicateLead(
+      timer?.time("step:handleDuplicateLead");
+      const duplicateResponse = await handleDuplicateLead(
         leadData,
         principalWithCampaign,
         organizationId,
         res,
+        timer,
       );
+      timer?.timeEnd("step:handleDuplicateLead");
+      timer?.timeEnd("handler:addLead");
+      return duplicateResponse;
     }
 
-    return await handleNewLead(
+    timer?.time("step:handleNewLead");
+    const newLeadResponse = await handleNewLead(
       leadData,
       principalWithCampaign,
       organizationId,
       res,
+      timer,
     );
+    timer?.timeEnd("step:handleNewLead");
+    timer?.timeEnd("handler:addLead");
+    return newLeadResponse;
   } catch (error) {
+    timer?.endAll();
     console.error("Error processing lead:", error);
     return res.status(400).json({
       success: false,
