@@ -476,6 +476,10 @@ module.exports = {
   generateExtendedReport,
   getLeadsGroupedByDateRouteCampaign,
   transformLeadsToChartData,
+  // Exported so anything else bucketing leads by day lands on the same
+  // calendar. Every date in this app is an IST date; a second implementation
+  // would disagree with this one for five and a half hours out of every day.
+  getISTDateString,
 };
 
 // {date, route, campaign, leads, revenue, duplicates}
