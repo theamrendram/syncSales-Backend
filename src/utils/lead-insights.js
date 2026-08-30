@@ -1,6 +1,7 @@
 const { Prisma } = require("@prisma/client");
 const prismaClient = require("./prismaClient");
 const logger = require("./logger");
+const { getISTDateString } = require("./chart-functions");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -301,11 +302,169 @@ const getSubBreakdown = async ({ where, startDate, field, routeId }) => {
   };
 };
 
+/**
+ * Safety cap on the daily series. One route over at most 90 days has to be
+ * extraordinarily busy to reach this — but `take` keeps the newest rows, so a
+ * caller that does hit it loses the *oldest* days, which on a line chart reads
+ * as traffic that started late rather than data that was dropped. Hence the
+ * `truncated` flag travelling with the series.
+ */
+const MAX_SERIES_LEADS = 50000;
+
+const round2 = (value) => Math.round(value * 100) / 100;
+
+const emptyDay = (date) => ({
+  date,
+  submitted: 0,
+  approved: 0,
+  trash: 0,
+  duplicates: 0,
+  pending: 0,
+  other: 0,
+});
+
+/**
+ * Every IST calendar day in the window, inclusive of both ends.
+ *
+ * The series is zero-filled from this rather than emitting only days that
+ * happen to have leads. A line chart given a sparse series draws a straight
+ * segment across the gap, which reads as steady traffic over a period that
+ * actually had none — the opposite of the truth. Filling here rather than in
+ * the UI means every consumer gets it right, and only this module has to know
+ * which calendar the app counts in.
+ *
+ * Stepping happens on UTC midnights of the already-converted date strings, so
+ * it is plain integer date arithmetic with no second timezone conversion to
+ * get wrong.
+ */
+const buildDateRange = (startDate, endDate) => {
+  const cursor = new Date(`${getISTDateString(startDate)}T00:00:00Z`);
+  const last = new Date(`${getISTDateString(endDate)}T00:00:00Z`);
+  const dates = [];
+
+  while (cursor <= last) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  return dates;
+};
+
+/**
+ * One route's daily performance over the window.
+ *
+ * Unlike the dashboard's `/chart`, this is not built from the shared capped
+ * page of leads. That page holds the newest `limit` rows *across every route*,
+ * so a quiet route sharing an org with a busy one loses its older days to the
+ * cap — and on a per-route line chart that is indistinguishable from the route
+ * having gone dead. Scoping the query to one route and selecting two columns
+ * makes an exact count affordable instead.
+ *
+ * `where` is the caller's lead scope from `resolveLeadScope`, spread rather
+ * than replaced: it is what confines a webmaster to their own campaigns, and a
+ * bare `routeId` filter in its place would hand them every lead on the route.
+ *
+ * Payout lives on the route and is constant across its leads, so both revenue
+ * figures are a multiplication rather than a per-lead sum.
+ */
+const getRouteSeries = async ({
+  where,
+  routeId,
+  payout = 0,
+  startDate,
+  endDate,
+}) => {
+  const leads = await prismaClient.lead.findMany({
+    where: { ...where, routeId, createdAt: { gte: startDate, lte: endDate } },
+    // Two scalars, no relations: the whole point of not reusing the dashboard's
+    // query, which pulls every column plus two joins for each lead.
+    select: { createdAt: true, status: true },
+    orderBy: { createdAt: "desc" },
+    take: MAX_SERIES_LEADS,
+  });
+
+  const byDate = new Map(
+    buildDateRange(startDate, endDate).map((date) => [date, emptyDay(date)]),
+  );
+
+  for (const lead of leads) {
+    if (!lead.createdAt) continue;
+
+    const day = byDate.get(getISTDateString(lead.createdAt));
+    // A lead can fall outside the range only if the window edges moved between
+    // building the range and the query returning; dropping it beats creating a
+    // stray point at the end of the chart.
+    if (!day) continue;
+
+    day.submitted += 1;
+
+    // Case-insensitive for the same reason every other status comparison here
+    // is: the postback handler stores the client's raw casing.
+    switch (String(lead.status ?? "").toLowerCase()) {
+      case "approved":
+        day.approved += 1;
+        break;
+      case "trash":
+        day.trash += 1;
+        break;
+      case "duplicate":
+        day.duplicates += 1;
+        break;
+      case "pending":
+        day.pending += 1;
+        break;
+      default:
+        day.other += 1;
+    }
+  }
+
+  const totals = emptyDay(null);
+
+  const series = Array.from(byDate.values()).map((day) => {
+    for (const key of ["submitted", "approved", "trash", "duplicates", "pending", "other"]) {
+      totals[key] += day[key];
+    }
+
+    // Pending is excluded from the denominator, matching `chartMetrics` and
+    // `/reports/statistics`: a backlog of undecided leads is not a rejection.
+    const decided = day.submitted - day.pending;
+
+    return {
+      ...day,
+      decided,
+      approvalRate: decided > 0 ? round2((day.approved / decided) * 100) : 0,
+      submittedRevenue: round2(day.submitted * payout),
+      earnedRevenue: round2(day.approved * payout),
+    };
+  });
+
+  const decidedTotal = totals.submitted - totals.pending;
+  const { date: _ignored, ...totalCounts } = totals;
+
+  return {
+    series,
+    totals: {
+      ...totalCounts,
+      decided: decidedTotal,
+      approvalRate:
+        decidedTotal > 0 ? round2((totals.approved / decidedTotal) * 100) : 0,
+      submittedRevenue: round2(totals.submitted * payout),
+      earnedRevenue: round2(totals.approved * payout),
+      // What the client still owes if every outstanding lead is approved.
+      pipelineRevenue: round2(totals.pending * payout),
+    },
+    returned: leads.length,
+    truncated: leads.length >= MAX_SERIES_LEADS,
+  };
+};
+
 module.exports = {
   AGING_BUCKETS,
   SUB_FIELDS,
   SUB_VALUE_LIMIT,
+  MAX_SERIES_LEADS,
   getPendingAging,
   getDeliveryHealth,
   getSubBreakdown,
+  getRouteSeries,
 };
