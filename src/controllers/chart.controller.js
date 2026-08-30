@@ -7,6 +7,7 @@ const {
   getPendingAging,
   getDeliveryHealth,
   getSubBreakdown,
+  getRouteSeries,
 } = require("../utils/lead-insights");
 const {
   chartMetrics,
@@ -17,6 +18,9 @@ const {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const CHART_PARTS = ["metrics", "series", "report"];
+
+/** Every date this app reports is an IST calendar date. Stated, not implied. */
+const TIMEZONE = "Asia/Kolkata";
 
 /**
  * Which slices of the chart payload the caller asked for.
@@ -273,9 +277,120 @@ const getSubIdBreakdown = async (req, res) => {
   }
 };
 
+/**
+ * One route's daily performance, for the per-route performance page.
+ *
+ * `:routeId` is `Route.id` — the uuid — not the `routeId` autoincrement the UI
+ * displays. The uuid is what every lead's foreign key points at, and it is not
+ * enumerable, which the sequential one is.
+ *
+ * The window is `days` wide and ends now, like `/chart`. No `offsetDays` here:
+ * a period-over-period comparison would be a second call with a shifted window,
+ * and nothing asks for one yet.
+ */
+const getRoutePerformance = async (req, res) => {
+  try {
+    const routeId = String(req.params.routeId || "").trim();
+
+    if (!routeId) {
+      return res.status(400).json({ error: "Route ID is required" });
+    }
+
+    const scope = await resolveLeadScope(req);
+    if (!scope.ok) {
+      return res.status(scope.status).json({ error: scope.error });
+    }
+
+    /**
+     * A webmaster is checked against their assignments *before* the route is
+     * loaded, and refused with the same 404 an unknown id gets.
+     *
+     * Spreading `scope.where` into the lead query already stops them reading
+     * another route's leads, but it would not stop them reading its metadata —
+     * and `payout` is the number their own payout is a cut of. Answering 403
+     * rather than 404 would leak which uuids are real, so both cases return the
+     * same thing.
+     */
+    if (
+      req.authContext?.isWebmaster &&
+      !(scope.routeIds ?? []).includes(routeId)
+    ) {
+      return res.status(404).json({ error: "Route not found" });
+    }
+
+    const route = await prismaClient.route.findFirst({
+      // Scoped to the caller's organization, so a valid uuid from another org
+      // is indistinguishable from one that does not exist.
+      where: { id: routeId, organizationId: scope.organizationId },
+      select: {
+        id: true,
+        routeId: true,
+        name: true,
+        product: true,
+        payout: true,
+        hasWebhook: true,
+        // Soft-deleted routes still resolve: their history is the reason
+        // someone opens this page. The flag lets the UI say so.
+        deletedAt: true,
+      },
+    });
+
+    if (!route) {
+      return res.status(404).json({ error: "Route not found" });
+    }
+
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 90);
+    const endDate = new Date();
+    const startDate = new Date(endDate.getTime() - days * DAY_MS);
+
+    // A webmaster assigned nothing never reaches here — the check above 404s
+    // first — but `resolveLeadScope` can still report an empty scope, and it
+    // carries no `where` to spread.
+    if (scope.empty) {
+      return res.status(200).json({
+        route,
+        series: [],
+        totals: null,
+        meta: { days, returned: 0, truncated: false, timezone: TIMEZONE },
+      });
+    }
+
+    const { series, totals, returned, truncated } = await getRouteSeries({
+      where: scope.where,
+      routeId: route.id,
+      payout: route.payout,
+      startDate,
+      endDate,
+    });
+
+    return res.status(200).json({
+      route,
+      series,
+      totals,
+      meta: {
+        days,
+        // The IST calendar days the series spans, so the caller never has to
+        // re-derive the window it asked for.
+        start: series[0]?.date ?? null,
+        end: series[series.length - 1]?.date ?? null,
+        returned,
+        truncated,
+        timezone: TIMEZONE,
+      },
+    });
+  } catch (error) {
+    logger.error({ err: error }, "Error getting route performance");
+    res.status(500).json({
+      error: "Unable to get route performance",
+      details: error.message,
+    });
+  }
+};
+
 module.exports = {
   getChartData,
   getMetricData,
   getLeadHealth,
   getSubIdBreakdown,
+  getRoutePerformance,
 };
