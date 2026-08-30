@@ -42,6 +42,7 @@ const campaignSelect = {
     select: {
       id: true,
       name: true,
+      routeId: true,
       product: true,
       method: true,
       url: true,
