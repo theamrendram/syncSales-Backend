@@ -9,6 +9,11 @@ const {
   getLeadsGroupedByDateRouteCampaign,
 } = require("../utils/chart-functions");
 const logger = require("../utils/logger");
+const {
+  logLeadOutcome,
+  fingerprintApiKey,
+  phoneLast4,
+} = require("../utils/lead-log");
 const { Parser } = require("json2csv");
 const {
   getLeadScopeForWebmaster,
@@ -272,8 +277,25 @@ const addLead = async (req, res) => {
       apiKey,
     } = req.body;
 
+    // Same outcome vocabulary as the public ingestion path, tagged with its own
+    // source so the two can be told apart.
+    const logFields = {
+      src: "dashboard",
+      campId,
+      keyFp: fingerprintApiKey(apiKey),
+      phoneLast4: phoneLast4(phone),
+    };
+
     // Validate required fields
     if (!firstName || !lastName || !phone || !apiKey || !campId) {
+      logLeadOutcome(req, {
+        ...logFields,
+        outcome: "missing_required_fields",
+        status: 400,
+        missing: ["firstName", "lastName", "phone", "apiKey", "campId"].filter(
+          (field) => !req.body[field],
+        ),
+      });
       return res.status(400).json({
         error: "Missing required fields",
         required: ["firstName", "lastName", "phone", "apiKey", "campId"],
@@ -346,6 +368,11 @@ const addLead = async (req, res) => {
     });
 
     if (!userWithCampaign) {
+      logLeadOutcome(req, {
+        ...logFields,
+        outcome: "invalid_api_key",
+        status: 400,
+      });
       return res.status(400).json({ error: "Invalid API key" });
     }
 
@@ -353,14 +380,35 @@ const addLead = async (req, res) => {
       userWithCampaign.ownedCampaigns[0] ||
       userWithCampaign.webmasterCampaignMemberships[0]?.campaign;
     if (!campaign) {
+      logLeadOutcome(req, {
+        ...logFields,
+        outcome: "invalid_campaign",
+        status: 400,
+      });
       return res.status(400).json({ error: "Invalid campaign ID" });
     }
 
+    logFields.campaignId = campaign.id;
+    logFields.routeId = campaign.routeId;
+    logFields.organizationId = campaign.organizationId;
+
     if (userWithCampaign.webmasterProfile) {
       if (!userWithCampaign.webmasterProfile.isActive) {
+        logLeadOutcome(req, {
+          ...logFields,
+          outcome: "webmaster_inactive",
+          status: 403,
+          actorUserId: userWithCampaign.id,
+        });
         return res.status(403).json({ error: "Webmaster account is inactive" });
       }
       if (!userWithCampaign.webmasterCampaignMemberships[0]) {
+        logLeadOutcome(req, {
+          ...logFields,
+          outcome: "campaign_access_denied",
+          status: 403,
+          actorUserId: userWithCampaign.id,
+        });
         return res
           .status(403)
           .json({ error: "Access denied to this campaign" });
@@ -371,6 +419,12 @@ const addLead = async (req, res) => {
       );
 
       if (!userMembership) {
+        logLeadOutcome(req, {
+          ...logFields,
+          outcome: "org_access_denied",
+          status: 403,
+          actorUserId: userWithCampaign.id,
+        });
         return res
           .status(403)
           .json({ error: "Access denied to this organization" });
@@ -424,6 +478,15 @@ const addLead = async (req, res) => {
         campaignId: campaign.id,
       });
 
+      logLeadOutcome(req, {
+        ...logFields,
+        outcome: "duplicate",
+        status: 200,
+        leadId: duplicateLead.id,
+        orgLeadId: duplicateLead.orgLeadId,
+        leadPeriod: campaign.lead_period,
+      });
+
       return res.json({
         success: false,
         message: "Duplicate lead detected",
@@ -466,10 +529,20 @@ const addLead = async (req, res) => {
           data: { webhookResponse },
         });
       } catch (webhookError) {
-        logger.error({ err: webhookError }, "Webhook error");
+        // sendWebhook has already logged the call with its status and the
+        // downstream verdict; the lead itself is still considered created.
         // Continue even if webhook fails
       }
     }
+
+    logLeadOutcome(req, {
+      ...logFields,
+      outcome: "created",
+      status: 200,
+      leadId: newLead.id,
+      orgLeadId: newLead.orgLeadId,
+      hasWebhook: !!(campaign.route.url && campaign.route.method),
+    });
 
     res.json({
       success: true,
@@ -477,7 +550,12 @@ const addLead = async (req, res) => {
       lead: newLead,
     });
   } catch (error) {
-    logger.error({ err: error }, "Error adding lead");
+    logLeadOutcome(req, {
+      src: "dashboard",
+      outcome: "error",
+      status: 500,
+      err: error,
+    });
     res.status(500).json({
       error: "Unable to add lead",
       details: error.message,

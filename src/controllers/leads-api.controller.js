@@ -5,6 +5,12 @@ const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
 const getClientIp = require("../utils/get-client-ip");
 const { encodePublicOrgLeadId } = require("../utils/org-lead-id");
 const { resolveApiKeyPrincipal } = require("../utils/api-key-principal");
+const logger = require("../utils/logger");
+const {
+  logLeadOutcome,
+  fingerprintApiKey,
+  phoneLast4,
+} = require("../utils/lead-log");
 
 const leadModelHasOrgLeadId =
   !!prismaClient?._runtimeDataModel?.models?.Lead?.fields?.some(
@@ -108,17 +114,18 @@ const createLead = async (leadData, usageUserId, organizationId, timer) => {
 };
 
 // Extract webhook handling to reduce duplication
-const handleWebhookAsync = async (route, lead) => {
+const handleWebhookAsync = async (route, lead, log) => {
   if (!route?.hasWebhook) return;
 
   try {
-    const webhookRes = await sendWebhook(route, lead);
+    // sendWebhook emits the lead_webhook line for both outcomes; it is the only
+    // place that knows the HTTP status and the downstream verdict.
+    const webhookRes = await sendWebhook(route, lead, log);
     await prismaClient.lead.update({
       where: { id: lead.id },
       data: { webhookResponse: webhookRes },
     });
   } catch (error) {
-    console.error("Error sending webhook:", error.message);
     // Store error in webhookResponse for debugging
     await prismaClient.lead
       .update({
@@ -131,7 +138,15 @@ const handleWebhookAsync = async (route, lead) => {
         },
       })
       .catch((updateError) => {
-        console.error("Failed to update lead with webhook error:", updateError);
+        (log || logger).error(
+          {
+            evt: "lead_webhook",
+            leadId: lead.id,
+            orgLeadId: lead.orgLeadId,
+            err: updateError,
+          },
+          "lead_webhook:persist_failed",
+        );
       });
   }
 };
@@ -140,8 +155,10 @@ const handleDuplicateLead = async (
   leadData,
   principalWithCampaign,
   organizationId,
+  req,
   res,
   timer,
+  logFields,
 ) => {
   const duplicateLead = await createLead(
     { ...leadData, status: "Duplicate" },
@@ -154,10 +171,25 @@ const handleDuplicateLead = async (
   const route = principalWithCampaign.campaigns[0]?.route;
   if (route?.hasWebhook) {
     // Fire and forget - don't block response
-    handleWebhookAsync(route, duplicateLead).catch((err) => {
-      console.error("Async webhook handling failed:", err);
+    handleWebhookAsync(route, duplicateLead, req.log).catch((err) => {
+      (req.log || logger).error(
+        { evt: "lead_webhook", leadId: duplicateLead.id, err },
+        "lead_webhook:unhandled",
+      );
     });
   }
+
+  logLeadOutcome(req, {
+    ...logFields,
+    outcome: "duplicate",
+    status: 400,
+    leadId: duplicateLead.id,
+    orgLeadId: duplicateLead.orgLeadId,
+    campaignId: duplicateLead.campaignId,
+    routeId: duplicateLead.routeId,
+    organizationId,
+    hasWebhook: !!route?.hasWebhook,
+  });
 
   return res.status(400).json({
     lead_id: encodePublicOrgLeadId(duplicateLead.orgLeadId),
@@ -169,8 +201,10 @@ const handleNewLead = async (
   leadData,
   principalWithCampaign,
   organizationId,
+  req,
   res,
   timer,
+  logFields,
 ) => {
   const lead = await createLead(
     leadData,
@@ -183,10 +217,25 @@ const handleNewLead = async (
   const route = principalWithCampaign.campaigns[0]?.route;
   if (route?.hasWebhook) {
     // Fire and forget - don't block response
-    handleWebhookAsync(route, lead).catch((err) => {
-      console.error("Async webhook handling failed:", err);
+    handleWebhookAsync(route, lead, req.log).catch((err) => {
+      (req.log || logger).error(
+        { evt: "lead_webhook", leadId: lead.id, err },
+        "lead_webhook:unhandled",
+      );
     });
   }
+
+  logLeadOutcome(req, {
+    ...logFields,
+    outcome: "created",
+    status: 201,
+    leadId: lead.id,
+    orgLeadId: lead.orgLeadId,
+    campaignId: lead.campaignId,
+    routeId: lead.routeId,
+    organizationId,
+    hasWebhook: !!route?.hasWebhook,
+  });
 
   return res.status(201).json({
     success: true,
@@ -348,11 +397,31 @@ const processLeadRequest = async (req, res, source) => {
     apiKey,
   } = data;
 
+  // Carried on every outcome line for this attempt, so one search by key or
+  // campaign returns the whole picture. The key itself is never logged.
+  const logFields = {
+    src: source === "body" ? "api-post" : "api-get",
+    campId,
+    keyFp: fingerprintApiKey(apiKey),
+  };
+
   // Validation
   if (!apiKey) {
+    logLeadOutcome(req, {
+      ...logFields,
+      outcome: "missing_api_key",
+      status: 400,
+    });
     return res.status(400).json({ error: "Missing API key" });
   }
   if (!name || !phone || !campId) {
+    logLeadOutcome(req, {
+      ...logFields,
+      outcome: "missing_required_fields",
+      status: 400,
+      // Field names only: the values are the customer's own details.
+      missing: ["name", "phone", "campId"].filter((field) => !data[field]),
+    });
     return res.status(400).json({ error: "Missing required fields" });
   }
 
@@ -365,8 +434,15 @@ const processLeadRequest = async (req, res, source) => {
   const sanitizedPhone = String(phone).replace(/\D/g, "");
 
   if (!sanitizedPhone) {
+    logLeadOutcome(req, {
+      ...logFields,
+      outcome: "invalid_phone",
+      status: 400,
+    });
     return res.status(400).json({ error: "Invalid phone number" });
   }
+
+  logFields.phoneLast4 = phoneLast4(sanitizedPhone);
 
   try {
     timer?.time("step:getPrincipalWithCampaign");
@@ -378,15 +454,34 @@ const processLeadRequest = async (req, res, source) => {
     );
     timer?.timeEnd("step:getPrincipalWithCampaign");
     if (!principalWithCampaign) {
+      logLeadOutcome(req, {
+        ...logFields,
+        outcome: "invalid_api_key",
+        status: 400,
+      });
       return res.status(400).json({ error: "Invalid API key" });
     }
 
+    logFields.principalType = principalWithCampaign.type;
+
     if (principalWithCampaign.type === "webmaster") {
       if (!principalWithCampaign.isActive) {
+        logLeadOutcome(req, {
+          ...logFields,
+          outcome: "webmaster_inactive",
+          status: 403,
+          actorUserId: principalWithCampaign.actorUserId,
+        });
         return res.status(403).json({ error: "Webmaster is inactive" });
       }
 
       if (!principalWithCampaign.organizationId) {
+        logLeadOutcome(req, {
+          ...logFields,
+          outcome: "webmaster_no_org",
+          status: 400,
+          actorUserId: principalWithCampaign.actorUserId,
+        });
         return res.status(400).json({
           error: "Webmaster API key must belong to an organization",
         });
@@ -395,8 +490,16 @@ const processLeadRequest = async (req, res, source) => {
 
     const campaign = principalWithCampaign.campaigns[0];
     if (!campaign) {
+      logLeadOutcome(req, {
+        ...logFields,
+        outcome: "invalid_campaign",
+        status: 400,
+      });
       return res.status(400).json({ error: "Invalid campaign ID" });
     }
+
+    logFields.campaignId = campaign.id;
+    logFields.routeId = campaign.routeId;
 
     timer?.time("step:resolveLeadOrganizationId");
     const organizationId = await resolveLeadOrganizationId(
@@ -406,6 +509,11 @@ const processLeadRequest = async (req, res, source) => {
     );
     timer?.timeEnd("step:resolveLeadOrganizationId");
     if (!organizationId) {
+      logLeadOutcome(req, {
+        ...logFields,
+        outcome: "org_unresolved",
+        status: 400,
+      });
       return res.status(400).json({
         error:
           "Campaign must be linked to an organization for lead ID assignment",
@@ -416,6 +524,13 @@ const processLeadRequest = async (req, res, source) => {
       principalWithCampaign.type === "webmaster" &&
       principalWithCampaign.organizationId !== organizationId
     ) {
+      logLeadOutcome(req, {
+        ...logFields,
+        outcome: "webmaster_org_mismatch",
+        status: 403,
+        keyOrgId: principalWithCampaign.organizationId,
+        campaignOrgId: organizationId,
+      });
       return res.status(403).json({
         error: "Webmaster organization does not match campaign organization",
       });
@@ -452,8 +567,10 @@ const processLeadRequest = async (req, res, source) => {
         leadData,
         principalWithCampaign,
         organizationId,
+        req,
         res,
         timer,
+        { ...logFields, leadPeriod: campaign.lead_period },
       );
       timer?.timeEnd("step:handleDuplicateLead");
       timer?.timeEnd("handler:addLead");
@@ -465,15 +582,24 @@ const processLeadRequest = async (req, res, source) => {
       leadData,
       principalWithCampaign,
       organizationId,
+      req,
       res,
       timer,
+      logFields,
     );
     timer?.timeEnd("step:handleNewLead");
     timer?.timeEnd("handler:addLead");
     return newLeadResponse;
   } catch (error) {
-    timer?.endAll();
-    console.error("Error processing lead:", error);
+    // The response is a 400 for the caller, but reaching here is a server-side
+    // failure, so it is logged at error level.
+    logLeadOutcome(req, {
+      ...logFields,
+      outcome: "error",
+      status: 400,
+      level: "error",
+      err: error,
+    });
     return res.status(400).json({
       success: false,
       error: "Unable to create lead",
@@ -493,7 +619,11 @@ const addLeadGet = async (req, res) => {
 const updateLead = async (req, res) => {
   const { id, data } = req.body;
 
-  console.log("update lead data", id, data);
+  // Field names only; the values are the lead's own contact details.
+  req.log?.info(
+    { evt: "lead_update", leadId: id, fields: data ? Object.keys(data) : [] },
+    "lead_update:received",
+  );
   if (!id || !data) {
     return res.status(400).json({ error: "Missing required fields" });
   }
@@ -509,7 +639,10 @@ const updateLead = async (req, res) => {
     if (error.code === "P2025") {
       return res.status(404).json({ error: "Lead not found" });
     }
-    console.error("Error updating lead:", error);
+    (req.log || logger).error(
+      { evt: "lead_update", leadId: id, err: error },
+      "lead_update:failed",
+    );
     return res.status(500).json({ error: "Failed to update lead." });
   }
 };

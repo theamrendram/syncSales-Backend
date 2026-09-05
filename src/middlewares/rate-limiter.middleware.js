@@ -1,4 +1,5 @@
 const rateLimiter = require("express-rate-limit");
+const { logLeadOutcome, fingerprintApiKey } = require("../utils/lead-log");
 
 const getRequestApiKey = (req) => {
   const bodyKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
@@ -16,6 +17,20 @@ const LeadsLimiter = rateLimiter.rateLimit({
   legacyHeaders: false,
   validate: {
     trustProxy: false,
+  },
+  // Throttled callers are otherwise invisible: the limiter answers without ever
+  // reaching the handler. This reproduces the default response exactly and only
+  // adds the log line.
+  handler: (req, res, next, options) => {
+    logLeadOutcome(req, {
+      src: "rate-limit",
+      outcome: "rate_limited",
+      status: options.statusCode,
+      keyFp: fingerprintApiKey(getRequestApiKey(req)) || undefined,
+      limit: options.limit,
+      windowMs: options.windowMs,
+    });
+    res.status(options.statusCode).send(options.message);
   },
   keyGenerator: (req) => {
     // Prefer API key on public lead ingestion; fallback to normalized IP.

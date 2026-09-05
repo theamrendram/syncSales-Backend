@@ -1,4 +1,5 @@
 const express = require("express");
+const { randomUUID } = require("crypto");
 const dotenv = require("dotenv");
 dotenv.config();
 const cors = require("cors");
@@ -6,6 +7,7 @@ const pinoHttp = require("pino-http");
 const { clerkMiddleware, requireAuth } = require("@clerk/express");
 const { config } = require("./config/env");
 const logger = require("./utils/logger");
+const { errSerializer } = require("./utils/log-serializers");
 const app = express();
 app.disable("x-powered-by");
 app.set("query parser", "simple");
@@ -55,8 +57,30 @@ app.use("/api/v1/clerk-webhook", clerkWebhookRoute);
 app.use(
   pinoHttp({
     logger,
+    // Cloudflare stamps a unique id on every request. Reusing it joins these
+    // logs to Cloudflare's own and survives a restart, which the default
+    // per-process counter does not.
+    genReqId: (req) => {
+      const cfRay = req.headers["cf-ray"];
+      return (typeof cfRay === "string" && cfRay) || randomUUID();
+    },
+    // Without this, req.log is bound to the whole serialized request, so every
+    // application log line repeats the full header set.
+    quietReqLogger: true,
     autoLogging: {
-      ignore: (req) => req.url === "/",
+      ignore: (req) => req.url === "/" || req.url === "/unauthenticated",
+    },
+    // The default serializer emits every request header on every line. Keep the
+    // few fields that identify the caller.
+    serializers: {
+      req: (req) => ({
+        method: req.method,
+        url: req.url,
+        ip: req.headers["cf-connecting-ip"] || req.remoteAddress,
+        country: req.headers["cf-ipcountry"],
+      }),
+      res: (res) => ({ statusCode: res.statusCode }),
+      err: errSerializer,
     },
     customLogLevel(req, res, err) {
       if (err || res.statusCode >= 500) return "error";

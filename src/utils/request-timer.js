@@ -1,53 +1,55 @@
-const { randomUUID } = require("crypto");
-
-// Dev-only stage timing for hot endpoints. Enable/disable with LEAD_TIMING.
-const enabled =
-  process.env.LEAD_TIMING === "true" ||
-  (process.env.LEAD_TIMING !== "false" &&
-    process.env.NODE_ENV !== "production");
+// Stage timing for the lead path. Timings are accumulated in memory and emitted
+// as one structured field on the request's outcome line rather than printed per
+// stage: console.time writes an unstructured line per stage, and Render records
+// one log entry per line, which buries the outcome and loses correlation.
+// Accumulating costs arithmetic and no I/O, so it stays on in production.
+const enabled = process.env.LEAD_TIMING !== "false";
 
 const noop = {
+  name: undefined,
   time() {},
   timeEnd() {},
   endAll() {},
+  stages: () => ({}),
+  elapsed: () => undefined,
 };
 
-// console.time labels are process-global, so scope every label to one request.
+const round = (ms) => Math.round(ms * 10) / 10;
+
 const createTimer = (name) => {
   if (!enabled) return noop;
 
-  const id = randomUUID().slice(0, 8);
-  const open = new Set();
-  const label = (stage) => `[${name} ${id}] ${stage}`;
+  const startedAt = process.hrtime.bigint();
+  const open = new Map();
+  const stages = {};
+  const msSince = (from) => round(Number(process.hrtime.bigint() - from) / 1e6);
 
   return {
+    name,
     time(stage) {
-      const key = label(stage);
-      if (open.has(key)) return;
-      open.add(key);
-      console.time(key);
+      if (!open.has(stage)) open.set(stage, process.hrtime.bigint());
     },
     timeEnd(stage) {
-      const key = label(stage);
-      if (!open.delete(key)) return;
-      console.timeEnd(key);
+      const from = open.get(stage);
+      if (from === undefined) return;
+      open.delete(stage);
+      stages[stage] = msSince(from);
     },
     // Close anything still open (early return, thrown error, 4xx bail-out).
     endAll() {
-      for (const key of [...open]) {
-        open.delete(key);
-        console.timeEnd(key);
+      for (const stage of [...open.keys()]) {
+        this.timeEnd(stage);
       }
     },
+    stages: () => stages,
+    elapsed: () => msSince(startedAt),
   };
 };
 
-// Express middleware: attaches req.timer and brackets the whole request.
+// Express middleware: attaches req.timer and closes it when the response ends.
 const requestTiming = (name) => (req, res, next) => {
   req.timer = createTimer(name);
-  req.timer.time("TOTAL");
   res.on("finish", () => {
-    req.timer.timeEnd("TOTAL");
     req.timer.endAll();
   });
   next();

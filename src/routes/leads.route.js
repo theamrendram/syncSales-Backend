@@ -7,11 +7,12 @@ const {
 } = require("../controllers/leads.controller.js");
 const { getChartData } = require("../controllers/chart.controller");
 const { LeadsDownloadLimiter } = require("../middlewares/rate-limiter.middleware");
+const { requestTiming } = require("../utils/request-timer");
 
 const router = require("express").Router();
 
 router.get("/", getLeads);
-router.post("/", addLead);
+router.post("/", requestTiming("POST /lead"), addLead);
 router.get("/user", getLeadsByUser);
 router.get("/user/pagination", getLeadsByUserPagination);
 router.get("/download", LeadsDownloadLimiter, downloadLeadsCsv);
