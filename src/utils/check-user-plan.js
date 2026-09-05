@@ -6,7 +6,9 @@ const checkUserPlan = async (req, res, next) => {
   const timer = req.timer;
   timer?.time("mw:checkUserPlan");
   try {
-    const { apiKey } = req.body;
+    // POST /leads/create carries the key in the body, GET /leads/create in the
+    // query string.
+    const apiKey = req.body?.apiKey ?? req.query?.apiKey;
 
     // Rejections here are the earliest and most common way a lead is lost, so
     // each one names itself rather than returning a bare status.

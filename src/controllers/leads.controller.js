@@ -514,13 +514,12 @@ const addLead = async (req, res) => {
     });
 
     // Send webhook if configured
-    if (campaign.route.url && campaign.route.method) {
+    if (campaign.route?.url && campaign.route?.method) {
       try {
         const webhookResponse = await sendWebhook(
-          campaign.route.url,
-          campaign.route.method,
-          campaign.route.attributes,
+          campaign.route,
           newLead,
+          req.log,
         );
 
         // Update lead with webhook response
@@ -541,7 +540,7 @@ const addLead = async (req, res) => {
       status: 200,
       leadId: newLead.id,
       orgLeadId: newLead.orgLeadId,
-      hasWebhook: !!(campaign.route.url && campaign.route.method),
+      hasWebhook: !!(campaign.route?.url && campaign.route?.method),
     });
 
     res.json({

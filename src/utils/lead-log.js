@@ -13,8 +13,8 @@ const fingerprintApiKey = (apiKey) => {
   return createHash("sha256").update(normalized).digest("hex").slice(0, 8);
 };
 
-// Support looks a lead up by the last digits the customer quotes; the full
-// number is redacted by the logger and lives only in the database.
+// Support looks a lead up by the last digits the customer quotes, and the
+// outcome line stays readable without repeating the whole number.
 const phoneLast4 = (phone) => {
   const digits = String(phone ?? "").replace(/\D/g, "");
   return digits ? digits.slice(-4) : undefined;
@@ -56,6 +56,51 @@ const summarizeWebhookResponse = (data) => {
 };
 
 const loggerFor = (req) => req?.log || logger;
+
+// A rejected lead can only be reproduced from the log if the payload that
+// arrived is in it, so the inbound body is written verbatim apart from the API
+// key. It carries customer contact details by definition; LOG_LEAD_BODY=false
+// switches it off without a deploy.
+const leadBodyLoggingEnabled = () => process.env.LOG_LEAD_BODY !== "false";
+
+const MAX_LOGGED_BODY_BYTES = 2048;
+
+const withoutApiKey = (payload) => {
+  if (!payload || typeof payload !== "object") return {};
+  const { apiKey, ...rest } = payload;
+  return rest;
+};
+
+// Logged before any validation or rate limiting, so payloads rejected by the
+// middleware chain are captured too - those are the ones with no other trace.
+const logLeadRequest = (req, source) => {
+  if (!leadBodyLoggingEnabled()) return;
+
+  const payload = source === "query" ? req?.query : req?.body;
+  const body = withoutApiKey(payload);
+  const bytes = byteLength(body);
+  // The request limit is 1mb; a payload that size must not become a log record.
+  const oversized = bytes !== undefined && bytes > MAX_LOGGED_BODY_BYTES;
+
+  loggerFor(req).info(
+    {
+      evt: "lead_request",
+      src: source,
+      route: req?.timer?.name,
+      keyFp: fingerprintApiKey(payload?.apiKey),
+      fields: Object.keys(body),
+      bytes,
+      body: oversized ? undefined : body,
+      truncated: oversized || undefined,
+    },
+    "lead_request",
+  );
+};
+
+const leadRequestLogger = (source) => (req, res, next) => {
+  logLeadRequest(req, source);
+  next();
+};
 
 // One line per lead attempt, carrying its terminal outcome. Render splits log
 // entries on newlines, so everything about an attempt has to fit one record.
@@ -116,6 +161,8 @@ const logLeadWebhook = (log, { lead, route, httpStatus, durationMs, data, err })
 
 module.exports = {
   fingerprintApiKey,
+  leadRequestLogger,
+  logLeadRequest,
   phoneLast4,
   logLeadOutcome,
   logLeadWebhook,

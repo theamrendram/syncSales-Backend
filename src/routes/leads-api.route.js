@@ -6,6 +6,7 @@ const {
 const { LeadsLimiter } = require("../middlewares/rate-limiter.middleware");
 const { checkUserPlan } = require("../utils/check-user-plan");
 const { requestTiming } = require("../utils/request-timer");
+const { leadRequestLogger } = require("../utils/lead-log");
 const router = require("express").Router();
 
 // Rate limiting is only enforced in production; elsewhere this is a pass-through.
@@ -17,6 +18,7 @@ const leadsRateLimiter =
 router.post(
   "/create",
   requestTiming("POST /leads/create"),
+  leadRequestLogger("body"),
   leadsRateLimiter,
   checkUserPlan,
   addLead,
@@ -24,6 +26,7 @@ router.post(
 router.get(
   "/create",
   requestTiming("GET /leads/create"),
+  leadRequestLogger("query"),
   leadsRateLimiter,
   checkUserPlan,
   addLeadGet,

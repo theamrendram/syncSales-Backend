@@ -6,9 +6,13 @@ const isProduction = process.env.NODE_ENV === "production";
 const logger = pino({
   level: process.env.LOG_LEVEL || (isProduction ? "info" : "debug"),
   // Logs ship to a hosted store that cannot be redacted after the fact, so
-  // credentials and customer contact details are stripped before they are
-  // written. Bare "email" is deliberately not redacted: the Clerk webhook flow
-  // logs it as its only identifier.
+  // credentials are stripped before they are written.
+  //
+  // Contact details are NOT blanket-redacted: the lead_request event logs the
+  // inbound payload deliberately, and a "*.phone"/"*.email" rule would empty it
+  // without saying so. Accidental leaks are held off at the source instead -
+  // errSerializer drops the axios request/response bodies, and the webhook
+  // event logs only the downstream id and verdict.
   redact: {
     paths: [
       "req.headers.authorization",
@@ -20,9 +24,7 @@ const logger = pino({
       "req.query.apiKey",
       "apiKey",
       "*.apiKey",
-      "phone",
-      "*.phone",
-      "*.email",
+      "*.*.apiKey",
       "razorpaySignature",
     ],
     remove: true,
