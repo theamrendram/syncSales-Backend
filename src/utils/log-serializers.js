@@ -16,4 +16,4 @@ const errSerializer = (err) => ({
   stack: typeof err?.stack === "string" ? err.stack.slice(0, 1000) : undefined,
 });
 
-module.exports = { errSerializer };
+export { errSerializer };

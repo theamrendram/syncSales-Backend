@@ -1,4 +1,4 @@
-const prisma = require("../utils/prismaClient");
+import prisma from "../utils/prismaClient.js";
 
 function assertRoleRouteContext(req, organizationId) {
   return (
@@ -176,10 +176,4 @@ const updateMemberRole = async (req, res) => {
   }
 };
 
-module.exports = {
-  createRole,
-  getRoles,
-  updateRole,
-  deleteRole,
-  updateMemberRole,
-};
+export { createRole, getRoles, updateRole, deleteRole, updateMemberRole };

@@ -1,9 +1,6 @@
-const { validate: uuidValidate } = require("uuid");
-const prisma = require("../utils/prismaClient");
-const {
-  PERMISSION_KEYS,
-  WEBMASTER_PERMISSIONS,
-} = require("../utils/role-permissions-schema");
+import { validate as uuidValidate } from "uuid";
+import prisma from "../utils/prismaClient.js";
+import { PERMISSION_KEYS, WEBMASTER_PERMISSIONS } from "../utils/role-permissions-schema.js";
 
 const OWNER_FALLBACK_PERMISSIONS = {
   canManageOrganization: true,
@@ -305,10 +302,4 @@ function requireOrgPermission(permission) {
   };
 }
 
-module.exports = {
-  authenticationContext,
-  requireOrgPermission,
-  extractPathOrganizationId,
-  normalizePermissions,
-  OWNER_FALLBACK_PERMISSIONS,
-};
+export { authenticationContext, requireOrgPermission, extractPathOrganizationId, normalizePermissions, OWNER_FALLBACK_PERMISSIONS };

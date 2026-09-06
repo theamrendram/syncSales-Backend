@@ -1,10 +1,8 @@
 /**
  * Legacy re-exports — use ./authentication-context.middleware.js directly.
  */
-const auth = require("./authentication-context.middleware");
+import * as auth from "./authentication-context.middleware.js";
 
-module.exports = {
-  resolveActiveOrganization: auth.authenticationContext(),
-  authenticationContext: auth.authenticationContext,
-  requireOrgPermission: auth.requireOrgPermission,
-};
+export const resolveActiveOrganization = auth.authenticationContext();
+export const authenticationContext = auth.authenticationContext;
+export const requireOrgPermission = auth.requireOrgPermission;

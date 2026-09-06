@@ -1,4 +1,4 @@
-const prisma = require("./prismaClient");
+import prisma from "./prismaClient.js";
 
 // Get user's organization context
 const getUserOrganizationContext = async (userId) => {
@@ -263,12 +263,4 @@ const getPrimaryOrganization = async (userId) => {
   }
 };
 
-module.exports = {
-  getUserOrganizationContext,
-  filterByOrganization,
-  addOrganizationFilter,
-  checkDataAccess,
-  getOrganizationStats,
-  migrateDataToOrganization,
-  getPrimaryOrganization,
-};
+export { getUserOrganizationContext, filterByOrganization, addOrganizationFilter, checkDataAccess, getOrganizationStats, migrateDataToOrganization, getPrimaryOrganization };

@@ -1,5 +1,5 @@
-const { createHash } = require("crypto");
-const logger = require("./logger");
+import { createHash } from "crypto";
+import logger from "./logger.js";
 
 const MAX_LOGGED_STRING = 120;
 
@@ -159,12 +159,4 @@ const logLeadWebhook = (log, { lead, route, httpStatus, durationMs, data, err })
   );
 };
 
-module.exports = {
-  fingerprintApiKey,
-  leadRequestLogger,
-  logLeadRequest,
-  phoneLast4,
-  logLeadOutcome,
-  logLeadWebhook,
-  summarizeWebhookResponse,
-};
+export { fingerprintApiKey, leadRequestLogger, logLeadRequest, phoneLast4, logLeadOutcome, logLeadWebhook, summarizeWebhookResponse };

@@ -1,4 +1,4 @@
-const { z } = require("zod");
+import { z } from "zod";
 
 const PERMISSION_KEYS = [
   "canManageOrganization",
@@ -33,10 +33,4 @@ function safeParseRolePermissions(input) {
   return rolePermissionsSchema.safeParse(input);
 }
 
-module.exports = {
-  PERMISSION_KEYS,
-  WEBMASTER_PERMISSIONS,
-  rolePermissionsSchema,
-  parseRolePermissions,
-  safeParseRolePermissions,
-};
+export { PERMISSION_KEYS, WEBMASTER_PERMISSIONS, rolePermissionsSchema, parseRolePermissions, safeParseRolePermissions };

@@ -1,5 +1,5 @@
-const logger = require("./logger");
-const prismaClient = require("./prismaClient");
+import logger from "./logger.js";
+import prismaClient from "./prismaClient.js";
 
 let handlersRegistered = false;
 
@@ -30,6 +30,4 @@ function registerProcessGuards() {
   handlersRegistered = true;
 }
 
-module.exports = {
-  registerProcessGuards,
-};
+export { registerProcessGuards };

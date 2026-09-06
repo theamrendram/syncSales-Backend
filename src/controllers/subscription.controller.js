@@ -1,7 +1,7 @@
-const { clerkClient } = require("@clerk/express");
-const prismaClient = require("../utils/prismaClient");
-const { generateKey } = require("../utils/generate-key");
-const logger = require("../utils/logger");
+import { clerkClient } from "@clerk/express";
+import prismaClient from "../utils/prismaClient.js";
+import { generateKey } from "../utils/generate-key.js";
+import logger from "../utils/logger.js";
 
 async function getSubscription(req, res) {
   const body = req.body;
@@ -60,6 +60,4 @@ async function getSubscription(req, res) {
   }
 }
 
-module.exports = {
-  getSubscription,
-};
+export { getSubscription };

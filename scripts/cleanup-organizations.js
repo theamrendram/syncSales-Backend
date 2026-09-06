@@ -1,4 +1,5 @@
-const { PrismaClient } = require("@prisma/client");
+import { pathToFileURL } from "url";
+import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 async function cleanupOrganizations() {
@@ -83,7 +84,8 @@ async function cleanupOrganizations() {
 }
 
 // Run the cleanup
-if (require.main === module) {
+if (import.meta.url ===
+  (process.argv[1] ? pathToFileURL(process.argv[1]).href : "")) {
   cleanupOrganizations()
     .then(() => {
       console.log("✅ Cleanup completed");
@@ -95,4 +97,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { cleanupOrganizations };
+export { cleanupOrganizations };

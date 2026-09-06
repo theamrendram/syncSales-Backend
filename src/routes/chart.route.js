@@ -1,10 +1,5 @@
-const {
-  getChartData,
-  getMetricData,
-  getLeadHealth,
-  getSubIdBreakdown,
-} = require("../controllers/chart.controller");
-const { Router } = require("express");
+import { getChartData, getMetricData, getLeadHealth, getSubIdBreakdown } from "../controllers/chart.controller.js";
+import { Router } from "express";
 
 const router = Router();
 
@@ -13,4 +8,4 @@ router.get("/metric", getMetricData);
 router.get("/health", getLeadHealth);
 router.get("/subs", getSubIdBreakdown);
 
-module.exports = router;
+export default router;

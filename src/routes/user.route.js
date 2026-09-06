@@ -1,11 +1,5 @@
-const {
-  addUser,
-  getAllUsers,
-  addUserAPI,
-  getUserAPI,
-  getUser,
-} = require("../controllers/user.controller");
-const express = require("express");
+import { addUser, getAllUsers, addUserAPI, getUserAPI, getUser } from "../controllers/user.controller.js";
+import express from "express";
 
 // Use express.Router() instead of router()
 const route = express.Router();
@@ -16,4 +10,4 @@ route.post("/api-key", addUserAPI);
 route.get("/api-key", getUserAPI);
 // route.get("/all", getAllUsers);
 
-module.exports = route;
+export default route;

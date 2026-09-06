@@ -1,12 +1,7 @@
-const {
-  addWebmaster,
-  getWebmasters,
-  getWebmasterById,
-  updateWebmaster,
-  deleteWebmaster,
-} = require("../controllers/webmaster.controller");
+import { addWebmaster, getWebmasters, getWebmasterById, updateWebmaster, deleteWebmaster } from "../controllers/webmaster.controller.js";
 
-const router = require("express").Router();
+import express from "express";
+const router = express.Router();
 
 router.post("/", addWebmaster);
 router.get("/", getWebmasters);
@@ -14,4 +9,4 @@ router.get("/:id", getWebmasterById);
 router.put("/:id", updateWebmaster);
 router.delete("/:id", deleteWebmaster);
 
-module.exports = router;
+export default router;

@@ -1,4 +1,4 @@
-const prismaClient = require("../utils/prismaClient");
+import prismaClient from "../utils/prismaClient.js";
 
 const getSellers = async (req, res) => {
   const sellers = await prismaClient.seller.findMany();
@@ -48,4 +48,4 @@ const deleteSeller = async (req, res) => {
       .json({ error: "Unable to delete seller", details: error.message });
   }
 };
-module.exports = { getSellers, addSeller, getSellerById, deleteSeller };
+export { getSellers, addSeller, getSellerById, deleteSeller };

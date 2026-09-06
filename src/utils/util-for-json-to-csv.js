@@ -1,6 +1,6 @@
-const prismaClient = require("../utils/prismaClient");
-const { Parser } = require("json2csv");
-const fs = require("fs");
+import prismaClient from "../utils/prismaClient.js";
+import { Parser } from "json2csv";
+import fs from "fs";
 
 // chirag: user_2tLzl5ParVio5T19i7JgcB80Dzh
 // karan: user_2wUpcMa080qc5635eeuSTOgoQUR

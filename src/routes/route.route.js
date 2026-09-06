@@ -1,14 +1,6 @@
-const {
-  addRoute,
-  editRoute,
-  getRoutes,
-  getRouteById,
-  deleteRouteById,
-} = require("../controllers/route.controller.js");
-const express = require("express");
-const {
-  requireOrgPermission,
-} = require("../middlewares/authentication-context.middleware");
+import { addRoute, editRoute, getRoutes, getRouteById, deleteRouteById } from "../controllers/route.controller.js";
+import express from "express";
+import { requireOrgPermission } from "../middlewares/authentication-context.middleware.js";
 
 const router = express.Router();
 
@@ -18,4 +10,4 @@ router.get("/:id", requireOrgPermission("canViewAllData"), getRouteById);
 router.put("/:id", requireOrgPermission("canEditAllData"), editRoute);
 router.delete("/:id", requireOrgPermission("canDeleteData"), deleteRouteById);
 
-module.exports = router;
+export default router;

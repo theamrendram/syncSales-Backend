@@ -1,11 +1,7 @@
-const { clerkClient } = require("@clerk/express");
-const prismaClient = require("../utils/prismaClient");
-const {
-  ensureDefaultRolesForOrganization,
-} = require("../utils/default-org-roles");
-const {
-  getExplicitRouteIdsForWebmaster,
-} = require("../utils/webmaster-campaigns");
+import { clerkClient } from "@clerk/express";
+import prismaClient from "../utils/prismaClient.js";
+import { ensureDefaultRolesForOrganization } from "../utils/default-org-roles.js";
+import { getExplicitRouteIdsForWebmaster } from "../utils/webmaster-campaigns.js";
 
 const getOwnerOrganization = async (userId) => {
   return prismaClient.organization.findUnique({
@@ -486,10 +482,4 @@ const deleteWebmaster = async (req, res) => {
   }
 };
 
-module.exports = {
-  addWebmaster,
-  getWebmasters,
-  getWebmasterById,
-  updateWebmaster,
-  deleteWebmaster,
-};
+export { addWebmaster, getWebmasters, getWebmasterById, updateWebmaster, deleteWebmaster };

@@ -1,18 +1,8 @@
-const prismaClient = require("../utils/prismaClient");
-const logger = require("../utils/logger");
-const { resolveLeadScope } = require("../utils/lead-scope");
-const {
-  AGING_BUCKETS,
-  SUB_FIELDS,
-  getPendingAging,
-  getDeliveryHealth,
-  getSubBreakdown,
-} = require("../utils/lead-insights");
-const {
-  chartMetrics,
-  generateExtendedReport,
-  getLeadsGroupedByDateRouteCampaign,
-} = require("../utils/chart-functions");
+import prismaClient from "../utils/prismaClient.js";
+import logger from "../utils/logger.js";
+import { resolveLeadScope } from "../utils/lead-scope.js";
+import { AGING_BUCKETS, SUB_FIELDS, getPendingAging, getDeliveryHealth, getSubBreakdown } from "../utils/lead-insights.js";
+import { chartMetrics, generateExtendedReport, getLeadsGroupedByDateRouteCampaign } from "../utils/chart-functions.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -273,9 +263,4 @@ const getSubIdBreakdown = async (req, res) => {
   }
 };
 
-module.exports = {
-  getChartData,
-  getMetricData,
-  getLeadHealth,
-  getSubIdBreakdown,
-};
+export { getChartData, getMetricData, getLeadHealth, getSubIdBreakdown };

@@ -1,6 +1,6 @@
-const prismaClient = require("../utils/prismaClient");
-const { generateKey } = require("../utils/generate-key");
-const { clerkClient } = require("@clerk/express");
+import prismaClient from "../utils/prismaClient.js";
+import { generateKey } from "../utils/generate-key.js";
+import { clerkClient } from "@clerk/express";
 
 const userSelect = {
   id: true,
@@ -186,13 +186,7 @@ const getUser = async (req, res) => {
   }
 };
 
-module.exports = {
-  addUser,
-  getUser,
-  getAllUsers,
-  addUserAPI,
-  getUserAPI,
-};
+export { addUser, getUser, getAllUsers, addUserAPI, getUserAPI };
 
 // {
 //     "id": "74185bb4-dc74-47d1-9b68-222717c423c9",

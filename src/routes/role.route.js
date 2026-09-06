@@ -1,6 +1,6 @@
-const express = require("express");
+import express from "express";
 const router = express.Router();
-const roleController = require("../controllers/role.controller");
+import * as roleController from "../controllers/role.controller.js";
 // const authMiddleware = require("../middlewares/auth.middleware");
 
 // Apply auth middleware to all routes
@@ -18,4 +18,4 @@ router.put(
   roleController.updateMemberRole
 );
 
-module.exports = router;
+export default router;

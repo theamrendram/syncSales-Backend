@@ -1,5 +1,5 @@
-const axios = require("axios");
-const { logLeadWebhook } = require("./lead-log");
+import axios from "axios";
+import { logLeadWebhook } from "./lead-log.js";
 
 const sendWebhook = async (route, lead, log) => {
   const startedAt = Date.now();
@@ -80,4 +80,4 @@ const sendWebhook = async (route, lead, log) => {
   }
 };
 
-module.exports = { sendWebhook };
+export { sendWebhook };

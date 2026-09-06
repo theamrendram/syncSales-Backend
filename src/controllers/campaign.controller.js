@@ -1,5 +1,5 @@
-const prismaClient = require("../utils/prismaClient");
-const { getCampaignIdsForWebmaster } = require("../utils/webmaster-campaigns");
+import prismaClient from "../utils/prismaClient.js";
+import { getCampaignIdsForWebmaster } from "../utils/webmaster-campaigns.js";
 
 const CAMPAIGN_MUTABLE_FIELDS = [
   "name",
@@ -293,10 +293,4 @@ const deleteCampaign = async (req, res) => {
     });
   }
 };
-module.exports = {
-  getCampaigns,
-  getCampaignById,
-  addCampaign,
-  editCampaign,
-  deleteCampaign,
-};
+export { getCampaigns, getCampaignById, addCampaign, editCampaign, deleteCampaign };

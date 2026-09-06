@@ -1,6 +1,6 @@
-const prismaClient = require("../utils/prismaClient");
-const logger = require("../utils/logger");
-const { getRouteIdsForWebmaster } = require("../utils/webmaster-campaigns");
+import prismaClient from "../utils/prismaClient.js";
+import logger from "../utils/logger.js";
+import { getRouteIdsForWebmaster } from "../utils/webmaster-campaigns.js";
 
 const ROUTE_REQUIRED_FIELDS = ["name", "product", "description", "payout"];
 
@@ -228,10 +228,4 @@ const deleteRouteById = async (req, res) => {
   }
 };
 
-module.exports = {
-  addRoute,
-  editRoute,
-  getRoutes,
-  getRouteById,
-  deleteRouteById,
-};
+export { addRoute, editRoute, getRoutes, getRouteById, deleteRouteById };

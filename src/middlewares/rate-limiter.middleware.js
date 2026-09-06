@@ -1,5 +1,5 @@
-const rateLimiter = require("express-rate-limit");
-const { logLeadOutcome, fingerprintApiKey } = require("../utils/lead-log");
+import { rateLimit } from "express-rate-limit";
+import { logLeadOutcome, fingerprintApiKey } from "../utils/lead-log.js";
 
 const getRequestApiKey = (req) => {
   const bodyKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
@@ -10,7 +10,7 @@ const getRequestApiKey = (req) => {
   return bodyKey || normalizedHeaderKey || "";
 };
 
-const LeadsLimiter = rateLimiter.rateLimit({
+const LeadsLimiter = rateLimit({
   windowMs: 10000, // limiter window
   limit: 1, // maximum request
   standardHeaders: "draft-8",
@@ -45,7 +45,7 @@ const LeadsLimiter = rateLimiter.rateLimit({
   },
 });
 
-const LeadsDownloadLimiter = rateLimiter.rateLimit({
+const LeadsDownloadLimiter = rateLimit({
   windowMs: 30_000,
   limit: 1,
   standardHeaders: "draft-8",
@@ -84,7 +84,4 @@ const LeadsDownloadLimiter = rateLimiter.rateLimit({
   },
 });
 
-module.exports = {
-  LeadsLimiter,
-  LeadsDownloadLimiter,
-};
+export { LeadsLimiter, LeadsDownloadLimiter };

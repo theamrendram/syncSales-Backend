@@ -1,7 +1,7 @@
-const crypto = require("crypto");
-const Razorpay = require("razorpay");
-const prismaClient = require("../utils/prismaClient");
-const logger = require("../utils/logger");
+import crypto from "crypto";
+import Razorpay from "razorpay";
+import prismaClient from "../utils/prismaClient.js";
+import logger from "../utils/logger.js";
 const instance = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
@@ -119,7 +119,4 @@ async function verifySubscription(req, res) {
   }
 }
 
-module.exports = {
-  createSubscription,
-  verifySubscription,
-};
+export { createSubscription, verifySubscription };

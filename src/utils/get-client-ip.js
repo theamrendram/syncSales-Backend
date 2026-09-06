@@ -6,4 +6,4 @@ function getClientIp(req) {
   return raw || "";
 }
 
-module.exports = getClientIp;
+export default getClientIp;

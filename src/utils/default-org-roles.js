@@ -1,4 +1,4 @@
-const prisma = require("./prismaClient");
+import prisma from "./prismaClient.js";
 
 /**
  * Seeded roles for each organization (same shape as organization signup).
@@ -81,7 +81,4 @@ async function ensureDefaultRolesForOrganization(organizationId) {
   }
 }
 
-module.exports = {
-  DEFAULT_ORG_ROLES,
-  ensureDefaultRolesForOrganization,
-};
+export { DEFAULT_ORG_ROLES, ensureDefaultRolesForOrganization };

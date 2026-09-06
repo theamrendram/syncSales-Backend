@@ -1,8 +1,5 @@
-const {
-  migrateExistingUsersToOrganizations,
-  checkMigrationStatus,
-  validateOrganizationIntegrity,
-} = require("../src/utils/migration-helper");
+import { pathToFileURL } from "url";
+import { migrateExistingUsersToOrganizations, checkMigrationStatus, validateOrganizationIntegrity } from "../src/utils/migration-helper.js";
 
 async function runMigration() {
   try {
@@ -50,8 +47,9 @@ async function runMigration() {
 }
 
 // Run the migration if this script is executed directly
-if (require.main === module) {
+if (import.meta.url ===
+  (process.argv[1] ? pathToFileURL(process.argv[1]).href : "")) {
   runMigration();
 }
 
-module.exports = { runMigration };
+export { runMigration };

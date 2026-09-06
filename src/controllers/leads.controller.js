@@ -1,23 +1,12 @@
-const prismaClient = require("../utils/prismaClient");
-const { sendWebhook } = require("../utils/sendWebhook");
-const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
-const getClientIp = require("../utils/get-client-ip");
-const {
-  chartMetrics,
-  generateExtendedReport,
-  transformLeadsToChartData,
-  getLeadsGroupedByDateRouteCampaign,
-} = require("../utils/chart-functions");
-const logger = require("../utils/logger");
-const {
-  logLeadOutcome,
-  fingerprintApiKey,
-  phoneLast4,
-} = require("../utils/lead-log");
-const { Parser } = require("json2csv");
-const {
-  getLeadScopeForWebmaster,
-} = require("../utils/webmaster-campaigns");
+import prismaClient from "../utils/prismaClient.js";
+import { sendWebhook } from "../utils/sendWebhook.js";
+import { checkDuplicateLead } from "../utils/check-duplicate-lead.js";
+import getClientIp from "../utils/get-client-ip.js";
+import { chartMetrics, generateExtendedReport, transformLeadsToChartData, getLeadsGroupedByDateRouteCampaign } from "../utils/chart-functions.js";
+import logger from "../utils/logger.js";
+import { logLeadOutcome, fingerprintApiKey, phoneLast4 } from "../utils/lead-log.js";
+import { Parser } from "json2csv";
+import { getLeadScopeForWebmaster } from "../utils/webmaster-campaigns.js";
 
 const MAX_PAGE_LIMIT = 100;
 const MAX_EXPORT_LIMIT = 1000;
@@ -1042,12 +1031,4 @@ const getPastTenDaysLeadsByUser = async (req, res) => {
   }
 };
 
-module.exports = {
-  getLeads,
-  addLead,
-  getLeadsByUser,
-  getLeadsByUserPagination,
-  downloadLeadsCsv,
-  getMonthlyLeadsByUser,
-  getPastTenDaysLeadsByUser,
-};
+export { getLeads, addLead, getLeadsByUser, getLeadsByUserPagination, downloadLeadsCsv, getMonthlyLeadsByUser, getPastTenDaysLeadsByUser };

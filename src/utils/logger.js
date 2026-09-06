@@ -1,5 +1,5 @@
-const pino = require("pino");
-const { errSerializer } = require("./log-serializers");
+import pino from "pino";
+import { errSerializer } from "./log-serializers.js";
 
 const isProduction = process.env.NODE_ENV === "production";
 
@@ -35,4 +35,4 @@ const logger = pino({
   base: undefined,
 });
 
-module.exports = logger;
+export default logger;

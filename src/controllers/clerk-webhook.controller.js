@@ -1,7 +1,7 @@
-const prisma = require("../utils/prismaClient");
-const { Webhook } = require("svix");
-const logger = require("../utils/logger");
-const { generateKey } = require("../utils/generate-key");
+import prisma from "../utils/prismaClient.js";
+import { Webhook } from "svix";
+import logger from "../utils/logger.js";
+import { generateKey } from "../utils/generate-key.js";
 
 // Handle Clerk webhook events
 const handleClerkWebhook = async (req, res) => {
@@ -163,4 +163,4 @@ async function handleUserDeleted(data) {
   }
 }
 
-module.exports = { handleClerkWebhook };
+export { handleClerkWebhook };

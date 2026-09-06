@@ -1,4 +1,4 @@
-const prisma = require("./prismaClient");
+import prisma from "./prismaClient.js";
 
 /**
  * Campaign IDs linked to a webmaster for an org (many-to-many via CampaignWebmaster).
@@ -64,9 +64,4 @@ async function getLeadScopeForWebmaster(userId, organizationId) {
   return { campaignIds, routeIds };
 }
 
-module.exports = {
-  getCampaignIdsForWebmaster,
-  getRouteIdsForWebmaster,
-  getExplicitRouteIdsForWebmaster,
-  getLeadScopeForWebmaster,
-};
+export { getCampaignIdsForWebmaster, getRouteIdsForWebmaster, getExplicitRouteIdsForWebmaster, getLeadScopeForWebmaster };

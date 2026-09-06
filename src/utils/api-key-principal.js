@@ -1,4 +1,4 @@
-const prismaClient = require("./prismaClient");
+import prismaClient from "./prismaClient.js";
 
 const resolveApiKeyPrincipal = async (apiKey, timer) => {
   if (!apiKey || typeof apiKey !== "string") {
@@ -82,6 +82,4 @@ const resolveApiKeyPrincipal = async (apiKey, timer) => {
   };
 };
 
-module.exports = {
-  resolveApiKeyPrincipal,
-};
+export { resolveApiKeyPrincipal };

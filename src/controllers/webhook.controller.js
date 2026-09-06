@@ -1,4 +1,4 @@
-const prismaClient = require("../utils/prismaClient");
+import prismaClient from "../utils/prismaClient.js";
 
 const addWebhook = async (req, res) => {
   const { name, url, method, attributes } = req.body;
@@ -38,4 +38,4 @@ const getWebhooks = async (req, res) => {
   res.json(webmasters);
 };
 
-module.exports = { addWebhook, getWebhooks };
+export { addWebhook, getWebhooks };

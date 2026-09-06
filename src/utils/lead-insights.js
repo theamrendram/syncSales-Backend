@@ -1,6 +1,6 @@
-const { Prisma } = require("@prisma/client");
-const prismaClient = require("./prismaClient");
-const logger = require("./logger");
+import { Prisma } from "@prisma/client";
+import prismaClient from "./prismaClient.js";
+import logger from "./logger.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -301,11 +301,4 @@ const getSubBreakdown = async ({ where, startDate, field, routeId }) => {
   };
 };
 
-module.exports = {
-  AGING_BUCKETS,
-  SUB_FIELDS,
-  SUB_VALUE_LIMIT,
-  getPendingAging,
-  getDeliveryHealth,
-  getSubBreakdown,
-};
+export { AGING_BUCKETS, SUB_FIELDS, SUB_VALUE_LIMIT, getPendingAging, getDeliveryHealth, getSubBreakdown };

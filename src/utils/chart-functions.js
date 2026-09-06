@@ -470,12 +470,6 @@ const calculateChartTrends = (chartData) => {
     totalLeads,
   };
 };
-module.exports = {
-  chartMetrics,
-  calculateChartTrends,
-  generateExtendedReport,
-  getLeadsGroupedByDateRouteCampaign,
-  transformLeadsToChartData,
-};
+export { chartMetrics, calculateChartTrends, generateExtendedReport, getLeadsGroupedByDateRouteCampaign, transformLeadsToChartData };
 
 // {date, route, campaign, leads, revenue, duplicates}

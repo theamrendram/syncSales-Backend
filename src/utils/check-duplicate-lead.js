@@ -1,4 +1,4 @@
-const prismaClient = require("../utils/prismaClient");
+import prismaClient from "../utils/prismaClient.js";
 
 const checkDuplicateLead = async (phone, campaign, timer) => {
   const lead_period = campaign.lead_period;
@@ -28,4 +28,4 @@ const checkDuplicateLead = async (phone, campaign, timer) => {
   return !!lead;
 };
 
-module.exports = { checkDuplicateLead };
+export { checkDuplicateLead };

@@ -1,17 +1,9 @@
-const express = require("express");
-const multer = require("multer");
-const path = require("path");
+import express from "express";
+import multer from "multer";
+import path from "path";
 const router = express.Router();
 
-const {
-  createOrganization,
-  getUserOrganizations,
-  getOrganization,
-  updateOrganization,
-  getMembers,
-  addMember,
-  removeMember,
-} = require("../controllers/organization.controller");
+import { createOrganization, getUserOrganizations, getOrganization, updateOrganization, getMembers, addMember, removeMember } from "../controllers/organization.controller.js";
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -46,4 +38,4 @@ router.get("/:organizationId/members", getMembers);
 router.post("/:organizationId/members", addMember);
 router.delete("/:organizationId/members/:memberId", removeMember);
 
-module.exports = router;
+export default router;

@@ -1,4 +1,4 @@
-const prisma = require("./prismaClient");
+import prisma from "./prismaClient.js";
 
 // Migration script to set up organizations for existing users
 const migrateExistingUsersToOrganizations = async () => {
@@ -327,9 +327,4 @@ const validateOrganizationIntegrity = async () => {
   }
 };
 
-module.exports = {
-  migrateExistingUsersToOrganizations,
-  checkMigrationStatus,
-  rollbackMigration,
-  validateOrganizationIntegrity,
-};
+export { migrateExistingUsersToOrganizations, checkMigrationStatus, rollbackMigration, validateOrganizationIntegrity };

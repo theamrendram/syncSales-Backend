@@ -1,6 +1,6 @@
-const prismaClient = require("./prismaClient");
-const { resolveApiKeyPrincipal } = require("./api-key-principal");
-const { logLeadOutcome, fingerprintApiKey } = require("./lead-log");
+import prismaClient from "./prismaClient.js";
+import { resolveApiKeyPrincipal } from "./api-key-principal.js";
+import { logLeadOutcome, fingerprintApiKey } from "./lead-log.js";
 
 const checkUserPlan = async (req, res, next) => {
   const timer = req.timer;
@@ -167,4 +167,4 @@ const checkUserPlan = async (req, res, next) => {
   }
 };
 
-module.exports = { checkUserPlan };
+export { checkUserPlan };

@@ -1,5 +1,5 @@
-const prismaClient = require("../utils/prismaClient");
-const { decodePublicOrgLeadId } = require("../utils/org-lead-id");
+import prismaClient from "../utils/prismaClient.js";
+import { decodePublicOrgLeadId } from "../utils/org-lead-id.js";
 
 async function addPostback(req, res) {
   const lead_id = req.query.lead_id;
@@ -75,4 +75,4 @@ async function addPostback(req, res) {
   }
 }
 
-module.exports = { addPostback };
+export { addPostback };

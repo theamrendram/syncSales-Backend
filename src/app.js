@@ -1,13 +1,16 @@
-const express = require("express");
-const { randomUUID } = require("crypto");
-const dotenv = require("dotenv");
-dotenv.config();
-const cors = require("cors");
-const pinoHttp = require("pino-http");
-const { clerkMiddleware, requireAuth } = require("@clerk/express");
-const { config } = require("./config/env");
-const logger = require("./utils/logger");
-const { errSerializer } = require("./utils/log-serializers");
+// Must be first: ESM evaluates every import before this module's body runs, so
+// a dotenv.config() call down here would land after config/env.js has already
+// snapshotted process.env. The side-effect import keeps it in evaluation order.
+import "dotenv/config";
+
+import express from "express";
+import { randomUUID } from "crypto";
+import cors from "cors";
+import pinoHttp from "pino-http";
+import { clerkMiddleware, requireAuth } from "@clerk/express";
+import { config } from "./config/env.js";
+import logger from "./utils/logger.js";
+import { errSerializer } from "./utils/log-serializers.js";
 const app = express();
 app.disable("x-powered-by");
 app.set("query parser", "simple");
@@ -27,24 +30,22 @@ if (trustProxySetting === undefined) {
 }
 
 // Routes
-const campaignRoute = require("./routes/campaign.route");
-const chartRoute = require("./routes/chart.route");
-const clerkWebhookRoute = require("./routes/clerk-webhook.route");
-const leadsApiRoute = require("./routes/leads-api.route");
-const leadsRoute = require("./routes/leads.route");
-const organizationRoute = require("./routes/organization.route");
-const postbackRoute = require("./routes/postback.route");
-const roleRoute = require("./routes/role.route");
-const routeRoute = require("./routes/route.route");
-const sellerRoute = require("./routes/seller.route");
-const subscriptionRoute = require("./routes/subscription.route");
-const userRoute = require("./routes/user.route");
-const webhookRoute = require("./routes/webhook.route");
-const webmasterRoute = require("./routes/webmaster.route");
-const { addUser } = require("./controllers/user.controller");
-const {
-  authenticationContext,
-} = require("./middlewares/authentication-context.middleware");
+import campaignRoute from "./routes/campaign.route.js";
+import chartRoute from "./routes/chart.route.js";
+import clerkWebhookRoute from "./routes/clerk-webhook.route.js";
+import leadsApiRoute from "./routes/leads-api.route.js";
+import leadsRoute from "./routes/leads.route.js";
+import organizationRoute from "./routes/organization.route.js";
+import postbackRoute from "./routes/postback.route.js";
+import roleRoute from "./routes/role.route.js";
+import routeRoute from "./routes/route.route.js";
+import sellerRoute from "./routes/seller.route.js";
+import subscriptionRoute from "./routes/subscription.route.js";
+import userRoute from "./routes/user.route.js";
+import webhookRoute from "./routes/webhook.route.js";
+import webmasterRoute from "./routes/webmaster.route.js";
+import { addUser } from "./controllers/user.controller.js";
+import { authenticationContext } from "./middlewares/authentication-context.middleware.js";
 
 const organizationContextStrict = authenticationContext();
 const organizationContextOptional = authenticationContext({
@@ -90,7 +91,7 @@ app.use(
   }),
 );
 app.use(express.json({ limit: config.requestLimit }));
-app.use(cors());
+app.use(cors({ origin: "*" }));
 app.use(express.urlencoded({ extended: true, limit: config.requestLimit }));
 
 // leads api
@@ -153,4 +154,4 @@ app.use((err, req, res, next) => {
   res.status(500).json({ message: "Internal Server Error" });
 });
 
-module.exports = app;
+export default app;

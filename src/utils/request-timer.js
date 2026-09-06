@@ -55,4 +55,4 @@ const requestTiming = (name) => (req, res, next) => {
   next();
 };
 
-module.exports = { createTimer, requestTiming };
+export { createTimer, requestTiming };

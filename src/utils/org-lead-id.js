@@ -24,4 +24,4 @@ function decodePublicOrgLeadId(s) {
   return n;
 }
 
-module.exports = { encodePublicOrgLeadId, decodePublicOrgLeadId };
+export { encodePublicOrgLeadId, decodePublicOrgLeadId };

@@ -1,5 +1,5 @@
-const prisma = require("../utils/prismaClient");
-const { DEFAULT_ORG_ROLES } = require("../utils/default-org-roles");
+import prisma from "../utils/prismaClient.js";
+import { DEFAULT_ORG_ROLES } from "../utils/default-org-roles.js";
 
 // Create a new organization
 const createOrganization = async (req, res) => {
@@ -469,12 +469,4 @@ const getUserOrganizations = async (req, res) => {
   }
 };
 
-module.exports = {
-  createOrganization,
-  getOrganization,
-  updateOrganization,
-  addMember,
-  removeMember,
-  getMembers,
-  getUserOrganizations,
-};
+export { createOrganization, getOrganization, updateOrganization, addMember, removeMember, getMembers, getUserOrganizations };

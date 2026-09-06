@@ -1,5 +1,5 @@
-const prismaClient = require("../utils/prismaClient");
-const jwt = require("jsonwebtoken");
+import prismaClient from "../utils/prismaClient.js";
+import jwt from "jsonwebtoken";
 
 const loginUser = async (req, res) => {
     const {email, password} = req.body;

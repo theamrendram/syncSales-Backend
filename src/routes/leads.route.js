@@ -1,15 +1,10 @@
-const {
-  addLead,
-  getLeads,
-  getLeadsByUser,
-  getLeadsByUserPagination,
-  downloadLeadsCsv,
-} = require("../controllers/leads.controller.js");
-const { getChartData } = require("../controllers/chart.controller");
-const { LeadsDownloadLimiter } = require("../middlewares/rate-limiter.middleware");
-const { requestTiming } = require("../utils/request-timer");
+import { addLead, getLeads, getLeadsByUser, getLeadsByUserPagination, downloadLeadsCsv } from "../controllers/leads.controller.js";
+import { getChartData } from "../controllers/chart.controller.js";
+import { LeadsDownloadLimiter } from "../middlewares/rate-limiter.middleware.js";
+import { requestTiming } from "../utils/request-timer.js";
 
-const router = require("express").Router();
+import express from "express";
+const router = express.Router();
 
 router.get("/", getLeads);
 router.post("/", requestTiming("POST /lead"), addLead);
@@ -18,4 +13,4 @@ router.get("/user/pagination", getLeadsByUserPagination);
 router.get("/download", LeadsDownloadLimiter, downloadLeadsCsv);
 router.get("/chart", getChartData);
 
-module.exports = router;
+export default router;

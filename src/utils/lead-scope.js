@@ -1,4 +1,4 @@
-const { getLeadScopeForWebmaster } = require("./webmaster-campaigns");
+import { getLeadScopeForWebmaster } from "./webmaster-campaigns.js";
 
 /**
  * The set of leads a caller is allowed to see, as a reusable Prisma `where`
@@ -59,4 +59,4 @@ const resolveLeadScope = async (req) => {
   return { ok: false, status: 403, error: "Unauthorized" };
 };
 
-module.exports = { resolveLeadScope };
+export { resolveLeadScope };

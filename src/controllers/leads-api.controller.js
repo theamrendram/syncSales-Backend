@@ -1,16 +1,12 @@
-const prismaClient = require("../utils/prismaClient");
-const { randomUUID } = require("crypto");
-const { sendWebhook } = require("../utils/sendWebhook");
-const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
-const getClientIp = require("../utils/get-client-ip");
-const { encodePublicOrgLeadId } = require("../utils/org-lead-id");
-const { resolveApiKeyPrincipal } = require("../utils/api-key-principal");
-const logger = require("../utils/logger");
-const {
-  logLeadOutcome,
-  fingerprintApiKey,
-  phoneLast4,
-} = require("../utils/lead-log");
+import prismaClient from "../utils/prismaClient.js";
+import { randomUUID } from "crypto";
+import { sendWebhook } from "../utils/sendWebhook.js";
+import { checkDuplicateLead } from "../utils/check-duplicate-lead.js";
+import getClientIp from "../utils/get-client-ip.js";
+import { encodePublicOrgLeadId } from "../utils/org-lead-id.js";
+import { resolveApiKeyPrincipal } from "../utils/api-key-principal.js";
+import logger from "../utils/logger.js";
+import { logLeadOutcome, fingerprintApiKey, phoneLast4 } from "../utils/lead-log.js";
 
 const leadModelHasOrgLeadId =
   !!prismaClient?._runtimeDataModel?.models?.Lead?.fields?.some(
@@ -647,8 +643,4 @@ const updateLead = async (req, res) => {
   }
 };
 
-module.exports = {
-  addLead,
-  addLeadGet,
-  updateLead,
-};
+export { addLead, addLeadGet, updateLead };
