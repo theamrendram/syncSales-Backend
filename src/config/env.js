@@ -9,7 +9,14 @@ function parseNumber(value, fallback) {
 }
 
 function validateEnv() {
-  const required = ["DATABASE_URL", "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"];
+  const required = [
+    "DATABASE_URL",
+    // Signs session cookies. Without it Better Auth cannot issue or verify a
+    // session, so failing fast at boot beats failing on first sign-in.
+    "BETTER_AUTH_SECRET",
+    "RAZORPAY_KEY_ID",
+    "RAZORPAY_KEY_SECRET",
+  ];
   const missing = required.filter((key) => !process.env[key]);
 
   if (missing.length > 0) {

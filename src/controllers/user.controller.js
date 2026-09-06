@@ -21,72 +21,15 @@ const userApiKeySelect = {
   apiKey: true,
 };
 const addUser = async (req, res) => {
-  const { firstName, lastName, email, password = "", companyName } = req.body;
-
-  console.log("req.body", req.body);
-  if (!firstName || !lastName || !email || !password) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
-  try {
-    const userExists = await prismaClient.user.findUnique({
-      where: {
-        email: email,
-      },
-    });
-
-    if (userExists) {
-      return res
-        .status(400)
-        .json({ error: "User already exists with this email" });
-    }
-
-    const clerkUser = await clerkClient.users.createUser({
-      username: email.split("@")[0].replace(/\./g, ""),
-      emailAddress: [email],
-      password,
-      firstName,
-      lastName,
-      deleteSelfEnabled: false,
-    });
-
-    console.log("clerkUser", clerkUser);
-
-    const user = await prismaClient.user.create({
-      data: {
-        id: clerkUser.id,
-        firstName,
-        lastName,
-        email,
-        password,
-        companyName,
-        apiKey:
-          Math.random().toString(36).substring(2, 15) +
-          Math.random().toString(36).substring(2, 15),
-      },
-    });
-    res.status(201).json(user);
-  } catch (error) {
-    console.log(error);
-    // Clerk errors come with `errors` array
-    if (error.errors && Array.isArray(error.errors)) {
-      return res.status(400).json({
-        error: "ClerkError",
-        details: error.errors.map((e) => ({
-          code: e.code,
-          message: e.message,
-          longMessage: e.longMessage,
-          meta: e.meta,
-        })),
-      });
-    }
-
-    // Fallback for other errors
-    res.status(500).json({
-      error: "Unable to create user",
-      details: error.message,
-    });
-  }
+  // Registration is owned by Better Auth (`POST /api/auth/sign-up/email`) and
+  // by the organization plugin's invitation flow. This handler used to create
+  // an identity-provider user plus a User row carrying a live apiKey, and it
+  // was additionally mounted unauthenticated at /api/v1/user/create — an open
+  // account-creation endpoint. It stays only to answer callers still pointing
+  // at the old path.
+  return res.status(403).json({ error: "Signups are currently disabled" });
 };
+
 
 const getAllUsers = async (req, res) => {
   try {

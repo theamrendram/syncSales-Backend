@@ -108,7 +108,6 @@ const addWebmaster = async (req, res) => {
         firstName,
         lastName,
         email,
-        password,
         apiKey: response.id,
         organizationId: ownerOrganization.id,
         webmasterProfile: {
