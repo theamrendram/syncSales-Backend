@@ -1,13 +1,10 @@
 /**
  * Better Auth instance — the single source of identity for the whole product.
- *
- * Both Next apps are consumers: they forward the session cookie to this API
- * and never hold a credential of their own. Nothing else in the codebase
- * should construct sessions or verify passwords.
  */
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { organization } from "better-auth/plugins";
+import { APIError } from "better-auth/api";
 
 import prisma from "../utils/prismaClient.js";
 import logger from "../utils/logger.js";
@@ -18,6 +15,7 @@ import {
   organizationInviteTemplate,
 } from "./email/templates.js";
 import { ORG_ROLES, DEFAULT_ROLE } from "./org-roles.js";
+import { DEFAULT_ORG_ROLES } from "../utils/default-org-roles.js";
 import { generateKey } from "../utils/generate-key.js";
 
 const APP_URL = process.env.APP_URL || "http://localhost:3000";
@@ -62,22 +60,7 @@ export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,
 
   database: prismaAdapter(prisma, { provider: "postgresql" }),
-
-  // The existing User table is adopted rather than replaced, which is what
-  // keeps every foreign key in the schema pointing at rows that still exist.
-  // Legacy ids stay Clerk-shaped; new ones are generated. Nothing reads the
-  // format, so the two coexist.
-  // No modelName overrides anywhere below. The Prisma adapter addresses models
-  // by their client property — it lower-cases the first letter, so `User`
-  // becomes `user` — and compares that against Better Auth's model names, which
-  // are already lower-case. Our PascalCase Prisma models therefore line up with
-  // the defaults exactly. Setting modelName: "User" makes the comparison fail
-  // and every table reads as missing.
   user: {
-    // Better Auth strips anything it does not recognise from an insert, so the
-    // columns the databaseHook below fills have to be declared here or they
-    // silently land as their column defaults. `input: false` keeps them out of
-    // the public sign-up payload — they are derived from `name`, never sent.
     additionalFields: {
       firstName: { type: "string", required: false, input: false },
       lastName: { type: "string", required: false, input: false },
@@ -195,9 +178,77 @@ export const auth = betterAuth({
         // entitlement hangs off (UserPlan and Subscription attach to the org
         // owner). Setting it in the same insert keeps the column and its
         // unique constraint truthful rather than relying on a later update.
-        beforeCreateOrganization: async ({ organization, user }) => ({
-          data: { ...organization, ownerId: user.id },
-        }),
+        beforeCreateOrganization: async ({ organization, user }) => {
+          // ownerId is @unique, so a second organization would fail on the
+          // index with an opaque database error. Fail with a readable one.
+          const existing = await prisma.organization.findUnique({
+            where: { ownerId: user.id },
+            select: { id: true },
+          });
+          if (existing) {
+            throw new APIError("BAD_REQUEST", {
+              code: "ORGANIZATION_ALREADY_OWNED",
+              message: "You already own an organization",
+            });
+          }
+          return { data: { ...organization, ownerId: user.id } };
+        },
+
+        // The permission layer (authentication-context.middleware.js) still
+        // reads Role and OrganizationMember, which the plugin knows nothing
+        // about. Until that read moves to Member, an organization created
+        // through the plugin would leave its owner with no permissions at all.
+        // Seeding both here keeps the two representations in step.
+        afterCreateOrganization: async ({ organization, user }) => {
+          try {
+            await prisma.$transaction(async (tx) => {
+              await tx.role.createMany({
+                data: DEFAULT_ORG_ROLES.map((role) => ({
+                  ...role,
+                  organizationId: organization.id,
+                })),
+                skipDuplicates: true,
+              });
+
+              const ownerRole = await tx.role.findFirst({
+                where: { organizationId: organization.id, name: "owner" },
+                select: { id: true },
+              });
+              if (!ownerRole) return;
+
+              await tx.organizationMember.upsert({
+                where: {
+                  userId_organizationId: {
+                    userId: user.id,
+                    organizationId: organization.id,
+                  },
+                },
+                update: { roleId: ownerRole.id, status: "active" },
+                create: {
+                  userId: user.id,
+                  organizationId: organization.id,
+                  roleId: ownerRole.id,
+                  status: "active",
+                },
+              });
+
+              // Mirrors the legacy createOrganization behaviour: the owner's
+              // own rows move under the organization they just created.
+              await tx.user.update({
+                where: { id: user.id },
+                data: { organizationId: organization.id },
+              });
+            });
+          } catch (err) {
+            // The organization and its Member row already exist; failing here
+            // would leave the caller thinking nothing was created. Log loudly
+            // instead — the backfill script can repair the legacy rows.
+            logger.error(
+              { err, organizationId: organization.id },
+              "failed to seed legacy role/member rows for new organization",
+            );
+          }
+        },
       },
       sendInvitationEmail: async ({ email, organization, inviter, id }) => {
         const url = `${APP_URL}/accept-invitation/${id}`;

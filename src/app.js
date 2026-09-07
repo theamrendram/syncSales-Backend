@@ -94,9 +94,12 @@ app.use(
 // Better Auth owns /api/auth/* and needs the raw body, so it is mounted ahead
 // of express.json() — the same ordering the Clerk webhook route already relies
 // on. CORS comes first so preflights on these routes still get their headers.
+// Defaults match src/lib/auth.js. The two must agree: an origin trusted for
+// auth but absent here has its preflight refused, and the browser reports that
+// only as an opaque "Failed to fetch".
 const allowedOrigins = [
-  process.env.APP_URL,
-  process.env.CRM_URL,
+  process.env.APP_URL || "http://localhost:3000",
+  process.env.CRM_URL || "http://localhost:3001",
   ...(process.env.EXTRA_CORS_ORIGINS || "").split(",").map((o) => o.trim()),
 ].filter(Boolean);
 
