@@ -1,4 +1,3 @@
-import { clerkClient } from "@clerk/express";
 import prismaClient from "../utils/prismaClient.js";
 import { generateKey } from "../utils/generate-key.js";
 import logger from "../utils/logger.js";

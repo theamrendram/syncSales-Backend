@@ -1,5 +1,8 @@
-import { clerkClient } from "@clerk/express";
 import prismaClient from "../utils/prismaClient.js";
+import auth from "../lib/auth.js";
+import logger from "../utils/logger.js";
+import { generateKey } from "../utils/generate-key.js";
+import { DEFAULT_ROLE } from "../lib/org-roles.js";
 import { ensureDefaultRolesForOrganization } from "../utils/default-org-roles.js";
 import { getExplicitRouteIdsForWebmaster } from "../utils/webmaster-campaigns.js";
 
@@ -72,21 +75,10 @@ const addWebmaster = async (req, res) => {
     const [firstName, ...rest] = String(fullName).trim().split(" ");
     const lastName = rest.join(" ") || "";
 
-    const response = await clerkClient.users.createUser({
-      username: firstName + Math.floor(Math.random() * 1000),
-      emailAddress: [email],
-      password,
-      firstName,
-      lastName,
-      deleteSelfEnabled: false,
-    });
-
-    await clerkClient.users.updateUserMetadata(response.id, {
-      privateMetadata: {
-        role: "webmaster",
-      },
-    });
-
+    // Resolved BEFORE the account exists. signUpEmail writes the User row
+    // itself, so bailing out after it would strand a half-built webmaster —
+    // an account with no organization that the "user already exists" check
+    // above would then refuse to let anyone recreate.
     await ensureDefaultRolesForOrganization(ownerOrganization.id);
 
     const memberRole = await prismaClient.role.findFirst({
@@ -102,13 +94,30 @@ const addWebmaster = async (req, res) => {
       });
     }
 
-    const createdUser = await prismaClient.user.create({
+    // Better Auth owns identity, so the account is created through it and the
+    // webmaster-specific columns are attached to the row it returns. The
+    // "webmaster" role is not stored on the identity provider any more: it is
+    // implied by the presence of a WebmasterProfile, which is what the auth
+    // middleware and the CRM already read.
+    //
+    // Errors deliberately fall through to the catch below, which maps Better
+    // Auth's APIError body (duplicate email, weak password) onto 422.
+    const signUp = await auth.api.signUpEmail({
+      body: { name: `${firstName} ${lastName}`.trim(), email, password },
+    });
+
+    const newUserId = signUp?.user?.id;
+    if (!newUserId) {
+      return res.status(500).json({ error: "Account creation returned no user" });
+    }
+
+    const createdUser = await prismaClient.user.update({
+      where: { id: newUserId },
       data: {
-        id: response.id,
-        firstName,
-        lastName,
-        email,
-        apiKey: response.id,
+        // Previously the API key was the identity provider's user id, which
+        // made a public credential equal to a user identifier. It is now an
+        // independently generated secret.
+        apiKey: generateKey(),
         organizationId: ownerOrganization.id,
         webmasterProfile: {
           create: {
@@ -120,6 +129,15 @@ const addWebmaster = async (req, res) => {
             organizationId: ownerOrganization.id,
             roleId: memberRole.id,
             status: "active",
+          },
+        },
+        // Written alongside the legacy row so the organization plugin sees the
+        // membership too. Both tables are maintained until the legacy pair is
+        // removed.
+        memberships: {
+          create: {
+            organizationId: ownerOrganization.id,
+            role: DEFAULT_ROLE,
           },
         },
       },
@@ -195,20 +213,18 @@ const addWebmaster = async (req, res) => {
       },
     });
   } catch (error) {
-    if (
-      error.clerkError &&
-      Array.isArray(error.errors) &&
-      error.errors.length > 0
-    ) {
-      const clerkError = error.errors[0];
+    // Better Auth reports validation problems (weak password, duplicate email)
+    // as APIError with a body carrying a code. Surface those as 422 the way the
+    // previous provider's errors were, so the CRM's existing handling still
+    // shows a usable message.
+    const apiBody = error?.body;
+    if (apiBody?.message || apiBody?.code) {
       return res.status(422).json({
-        error:
-          clerkError.longMessage ||
-          clerkError.message ||
-          "Unable to create webmaster",
-        code: clerkError.code,
+        error: apiBody.message || "Unable to create webmaster",
+        code: apiBody.code,
       });
     }
+    logger.error({ err: error }, "addWebmaster failed");
     res
       .status(400)
       .json({ error: "Unable to create webmaster", details: error.message });
@@ -411,10 +427,17 @@ const updateWebmaster = async (req, res) => {
       },
     });
 
+    // Suspending a webmaster has to end their access now, not whenever their
+    // session happens to expire. WebmasterProfile.isActive gates new requests;
+    // deleting the sessions closes the ones already open.
     if (isActive === false) {
-      await clerkClient.users.lockUser(updated.id);
-    } else if (isActive === true) {
-      await clerkClient.users.unlockUser(updated.id);
+      const { count } = await prismaClient.session.deleteMany({
+        where: { userId: updated.id },
+      });
+      logger.info(
+        { userId: updated.id, revoked: count },
+        "webmaster deactivated; sessions revoked",
+      );
     }
 
     return res.status(200).json(formatWebmaster(updated));
@@ -467,11 +490,11 @@ const deleteWebmaster = async (req, res) => {
       data: { userId: requestingUserId },
     });
 
+    // Session, Account and Member all cascade from User, so this single delete
+    // removes the identity along with the row.
     await prismaClient.user.delete({
       where: { id },
     });
-
-    await clerkClient.users.deleteUser(id);
 
     res.status(200).json({ message: "Webmaster deleted" });
   } catch (error) {

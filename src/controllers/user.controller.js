@@ -1,6 +1,5 @@
 import prismaClient from "../utils/prismaClient.js";
 import { generateKey } from "../utils/generate-key.js";
-import { clerkClient } from "@clerk/express";
 
 const userSelect = {
   id: true,

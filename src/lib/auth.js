@@ -18,6 +18,7 @@ import {
   organizationInviteTemplate,
 } from "./email/templates.js";
 import { ORG_ROLES, DEFAULT_ROLE } from "./org-roles.js";
+import { generateKey } from "../utils/generate-key.js";
 
 const APP_URL = process.env.APP_URL || "http://localhost:3000";
 const CRM_URL = process.env.CRM_URL || "http://localhost:3001";
@@ -29,6 +30,31 @@ const BASE_URL = process.env.BETTER_AUTH_URL || "http://localhost:8000";
  * where the apps are localhost ports and a domain attribute would break them.
  */
 const COOKIE_DOMAIN = process.env.AUTH_COOKIE_DOMAIN || null;
+
+/**
+ * Better Auth builds action links against this API's own origin, and a
+ * `callbackURL` that is relative — the default is "/" — therefore resolves to
+ * the API too. Following one lands the user on the API root instead of the app.
+ *
+ * Relative callbacks are rebased onto the frontend; absolute ones a caller
+ * supplied deliberately are left alone.
+ */
+function withAppCallback(rawUrl, fallbackPath = "/") {
+  try {
+    const url = new URL(rawUrl);
+    const cb = url.searchParams.get("callbackURL");
+    // Better Auth always sets a callbackURL, defaulting it to "/", so a bare
+    // "/" means the caller did not choose one — use the fallback, which can say
+    // what just happened. Any other relative path is the caller's, rebased.
+    const target = !cb || cb === "/" ? fallbackPath : cb;
+    if (!cb || cb.startsWith("/")) {
+      url.searchParams.set("callbackURL", new URL(target, APP_URL).toString());
+    }
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
 
 export const auth = betterAuth({
   appName: "SyncSales",
@@ -55,6 +81,7 @@ export const auth = betterAuth({
     additionalFields: {
       firstName: { type: "string", required: false, input: false },
       lastName: { type: "string", required: false, input: false },
+      apiKey: { type: "string", required: false, input: false },
     },
   },
 
@@ -70,7 +97,7 @@ export const auth = betterAuth({
     sendResetPassword: async ({ user, url }) => {
       const { subject, html } = resetPasswordTemplate({
         name: user.name,
-        url,
+        url: withAppCallback(url, "/auth?reset=done"),
       });
       await sendEmail({ to: user.email, subject, html });
     },
@@ -80,7 +107,10 @@ export const auth = betterAuth({
     sendOnSignUp: true,
     autoSignInAfterVerification: true,
     sendVerificationEmail: async ({ user, url }) => {
-      const { subject, html } = verifyEmailTemplate({ name: user.name, url });
+      const { subject, html } = verifyEmailTemplate({
+        name: user.name,
+        url: withAppCallback(url, "/auth?verified=1"),
+      });
       await sendEmail({ to: user.email, subject, html });
     },
   },
@@ -109,7 +139,6 @@ export const auth = betterAuth({
       secure: process.env.NODE_ENV === "production",
     },
   },
-
   trustedOrigins: [APP_URL, CRM_URL],
 
   databaseHooks: {
@@ -120,13 +149,22 @@ export const auth = betterAuth({
         // CSV exports). Split once, here, so no downstream code has to care
         // which system created the row.
         before: async (user) => {
-          if (user.firstName || user.lastName) return;
           const parts = String(user.name || "").trim().split(/\s+/).filter(Boolean);
           return {
             data: {
               ...user,
-              firstName: parts[0] || "",
-              lastName: parts.slice(1).join(" ") || "",
+              ...(user.firstName || user.lastName
+                ? {}
+                : {
+                  firstName: parts[0] || "",
+                  lastName: parts.slice(1).join(" ") || "",
+                }),
+              // User.apiKey is `@unique @default("0")` and Better Auth never
+              // sets it, so without this every account it creates would take
+              // the literal default "0" — the first signup succeeds and the
+              // second dies on the unique index, reported only as the generic
+              // "Failed to create user".
+              ...(user.apiKey ? {} : { apiKey: generateKey() }),
             },
           };
         },
