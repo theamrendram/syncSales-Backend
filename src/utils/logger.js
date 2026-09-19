@@ -22,7 +22,8 @@ const logger = pino({
       "req.body.apiKey",
       "req.body.customer",
       "req.query.apiKey",
-      "apiKey",
+      // Top-level "apiKey" is deliberately absent: the lead_request event
+      // prints the caller's key so a lead can be replayed from the logs alone.
       "*.apiKey",
       "*.*.apiKey",
       "razorpaySignature",

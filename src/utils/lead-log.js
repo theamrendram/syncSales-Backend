@@ -1,5 +1,6 @@
 const { createHash } = require("crypto");
 const logger = require("./logger");
+const getClientIp = require("./get-client-ip");
 
 const MAX_LOGGED_STRING = 120;
 
@@ -63,34 +64,102 @@ const loggerFor = (req) => req?.log || logger;
 // switches it off without a deploy.
 const leadBodyLoggingEnabled = () => process.env.LOG_LEAD_BODY !== "false";
 
-const MAX_LOGGED_BODY_BYTES = 2048;
+const MAX_LOGGED_BODY_BYTES = 16 * 1024;
 
+// A non-object payload (array, string) is kept as-is: it is exactly what a
+// misconfigured caller sent, and that is what needs reproducing.
 const withoutApiKey = (payload) => {
-  if (!payload || typeof payload !== "object") return {};
+  if (payload == null) return {};
+  if (typeof payload !== "object" || Array.isArray(payload)) return payload;
   const { apiKey, ...rest } = payload;
   return rest;
 };
 
+// Credentials are the only headers withheld; the rest are needed to tell a
+// browser form post from a server-side integration when a payload is malformed.
+const SENSITIVE_HEADERS = new Set(["authorization", "cookie", "x-api-key"]);
+
+const withoutSensitiveHeaders = (headers) => {
+  if (!headers || typeof headers !== "object") return {};
+  const out = {};
+  for (const [name, value] of Object.entries(headers)) {
+    if (!SENSITIVE_HEADERS.has(name.toLowerCase())) out[name] = value;
+  }
+  return out;
+};
+
+// GET /leads/create carries the key in the query string, so the raw URL would
+// leak it.
+const urlWithoutApiKey = (rawUrl) => {
+  if (typeof rawUrl !== "string") return undefined;
+  try {
+    const parsed = new URL(rawUrl, "http://localhost");
+    parsed.searchParams.delete("apiKey");
+    return parsed.pathname + parsed.search;
+  } catch {
+    return rawUrl.split("?")[0];
+  }
+};
+
+const digitsOnly = (value) => {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return digits || undefined;
+};
+
+// Everything that arrived. The log line is the only record of a request the
+// database never saw, so it has to be enough to replay the lead by hand - which
+// is why the API key is printed here, as the one exception to the redaction
+// rules in logger.js.
+const snapshotLeadRequest = (req, source) => {
+  const payload = source === "query" ? req?.query : req?.body;
+  const primary = withoutApiKey(payload);
+  const isRecord = primary && typeof primary === "object" && !Array.isArray(primary);
+  const apiKey = payload?.apiKey ?? req?.headers?.["x-api-key"];
+
+  let ip;
+  try {
+    ip = getClientIp(req) || undefined;
+  } catch {
+    ip = undefined;
+  }
+
+  return {
+    src: source,
+    method: req?.method,
+    url: urlWithoutApiKey(req?.originalUrl ?? req?.url),
+    httpVersion: req?.httpVersion,
+    protocol: req?.protocol,
+    ip,
+    apiKey: scalar(apiKey),
+    keyFp: fingerprintApiKey(apiKey),
+    campId: isRecord ? scalar(primary.campId) : undefined,
+    phone: isRecord ? digitsOnly(primary.phone) : undefined,
+    fields: isRecord ? Object.keys(primary) : [],
+    headers: withoutSensitiveHeaders(req?.headers),
+    query: withoutApiKey(req?.query),
+    body: withoutApiKey(req?.body),
+    params: req?.params ?? {},
+  };
+};
+
 // Logged before any validation or rate limiting, so payloads rejected by the
 // middleware chain are captured too - those are the ones with no other trace.
-const logLeadRequest = (req, source) => {
+const logLeadRequest = (req, source, snapshot = snapshotLeadRequest(req, source)) => {
   if (!leadBodyLoggingEnabled()) return;
 
-  const payload = source === "query" ? req?.query : req?.body;
-  const body = withoutApiKey(payload);
-  const bytes = byteLength(body);
+  const { body, query, ...rest } = snapshot;
+  const bytes = byteLength({ body, query });
   // The request limit is 1mb; a payload that size must not become a log record.
   const oversized = bytes !== undefined && bytes > MAX_LOGGED_BODY_BYTES;
 
   loggerFor(req).info(
     {
       evt: "lead_request",
-      src: source,
       route: req?.timer?.name,
-      keyFp: fingerprintApiKey(payload?.apiKey),
-      fields: Object.keys(body),
+      ...rest,
       bytes,
       body: oversized ? undefined : body,
+      query: oversized ? undefined : query,
       truncated: oversized || undefined,
     },
     "lead_request",
@@ -163,6 +232,7 @@ module.exports = {
   fingerprintApiKey,
   leadRequestLogger,
   logLeadRequest,
+  snapshotLeadRequest,
   phoneLast4,
   logLeadOutcome,
   logLeadWebhook,
