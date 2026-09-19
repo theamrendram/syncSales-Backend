@@ -1,6 +1,7 @@
 const prismaClient = require("./prismaClient");
 const { resolveApiKeyPrincipal } = require("./api-key-principal");
 const { logLeadOutcome, fingerprintApiKey } = require("./lead-log");
+const { isDatabaseUnavailable, sendDatabaseUnavailable } = require("./db-errors");
 
 const checkUserPlan = async (req, res, next) => {
   const timer = req.timer;
@@ -157,6 +158,16 @@ const checkUserPlan = async (req, res, next) => {
     timer?.timeEnd("mw:checkUserPlan");
     next();
   } catch (error) {
+    // Database down: 503 so the sender retries instead of dropping the lead.
+    if (isDatabaseUnavailable(error)) {
+      logLeadOutcome(req, {
+        src: "plan-check",
+        outcome: "db_unavailable",
+        status: 503,
+        err: error,
+      });
+      return sendDatabaseUnavailable(req, res);
+    }
     logLeadOutcome(req, {
       src: "plan-check",
       outcome: "plan_check_error",

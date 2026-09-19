@@ -10,40 +10,56 @@ const getRequestApiKey = (req) => {
   return bodyKey || normalizedHeaderKey || "";
 };
 
-const LeadsLimiter = rateLimiter.rateLimit({
-  windowMs: 10000, // limiter window
-  limit: 1, // maximum request
-  standardHeaders: "draft-8",
-  legacyHeaders: false,
-  validate: {
-    trustProxy: false,
-  },
-  // Throttled callers are otherwise invisible: the limiter answers without ever
-  // reaching the handler. This reproduces the default response exactly and only
-  // adds the log line.
-  handler: (req, res, next, options) => {
-    logLeadOutcome(req, {
-      src: "rate-limit",
-      outcome: "rate_limited",
-      status: options.statusCode,
-      keyFp: fingerprintApiKey(getRequestApiKey(req)) || undefined,
-      limit: options.limit,
-      windowMs: options.windowMs,
-    });
-    res.status(options.statusCode).send(options.message);
-  },
-  keyGenerator: (req) => {
-    // Prefer API key on public lead ingestion; fallback to normalized IP.
-    const forwardedFor = req.headers["x-forwarded-for"];
-    const normalizedIp = Array.isArray(forwardedFor)
-      ? forwardedFor[0]
-      : typeof forwardedFor === "string"
-        ? forwardedFor.split(",")[0].trim()
-        : req.ip || req.socket?.remoteAddress;
+// Every 429 here is a delivered lead we did not store. The old 1-per-10s limit
+// rejected real leads in normal traffic (21 of 109 on 16-19 Sep 2026). Double
+// submits are caught by the duplicate check, so this only needs to stop floods.
+const parsePositiveInt = (value, fallback) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
 
-    return getRequestApiKey(req) || normalizedIp || "anonymous";
-  },
-});
+const createLeadsLimiter = ({
+  limit = parsePositiveInt(process.env.LEADS_RATE_LIMIT, 60),
+  windowMs = parsePositiveInt(process.env.LEADS_RATE_WINDOW_MS, 60_000),
+} = {}) =>
+  rateLimiter.rateLimit({
+    windowMs,
+    limit,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    validate: {
+      trustProxy: false,
+    },
+    // The limiter answers before the handler, so log the outcome here. The
+    // payload is on the lead_request line with the same reqId.
+    handler: (req, res, next, options) => {
+      logLeadOutcome(req, {
+        src: "rate-limit",
+        outcome: "rate_limited",
+        status: options.statusCode,
+        keyFp: fingerprintApiKey(getRequestApiKey(req)) || undefined,
+        limit: options.limit,
+        windowMs: options.windowMs,
+      });
+      res.status(options.statusCode).json({
+        error: "Too many requests, please try again later.",
+        retryAfterSeconds: Math.ceil(options.windowMs / 1000),
+      });
+    },
+    keyGenerator: (req) => {
+      // Prefer API key on public lead ingestion; fallback to normalized IP.
+      const forwardedFor = req.headers["x-forwarded-for"];
+      const normalizedIp = Array.isArray(forwardedFor)
+        ? forwardedFor[0]
+        : typeof forwardedFor === "string"
+          ? forwardedFor.split(",")[0].trim()
+          : req.ip || req.socket?.remoteAddress;
+
+      return getRequestApiKey(req) || normalizedIp || "anonymous";
+    },
+  });
+
+const LeadsLimiter = createLeadsLimiter();
 
 const LeadsDownloadLimiter = rateLimiter.rateLimit({
   windowMs: 30_000,
@@ -87,4 +103,5 @@ const LeadsDownloadLimiter = rateLimiter.rateLimit({
 module.exports = {
   LeadsLimiter,
   LeadsDownloadLimiter,
+  createLeadsLimiter,
 };

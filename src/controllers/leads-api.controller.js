@@ -11,6 +11,10 @@ const {
   fingerprintApiKey,
   phoneLast4,
 } = require("../utils/lead-log");
+const {
+  isDatabaseUnavailable,
+  sendDatabaseUnavailable,
+} = require("../utils/db-errors");
 
 const leadModelHasOrgLeadId =
   !!prismaClient?._runtimeDataModel?.models?.Lead?.fields?.some(
@@ -41,8 +45,16 @@ const LEAD_INSERT_COLUMNS = [
 // One statement instead of an interactive transaction: BEGIN/COMMIT alone cost
 // two network round trips, and each nested query cost another. A single
 // data-modifying CTE is still atomic and runs in one round trip.
-const createLead = async (leadData, usageUserId, organizationId, timer) => {
-  const today = new Date();
+//
+// receivedAt (replay only) backdates "date"/"createdAt" and the usage row.
+const createLead = async (
+  leadData,
+  usageUserId,
+  organizationId,
+  timer,
+  receivedAt,
+) => {
+  const today = receivedAt ? new Date(receivedAt) : new Date();
   today.setUTCHours(0, 0, 0, 0);
 
   const params = [];
@@ -73,12 +85,16 @@ const createLead = async (leadData, usageUserId, organizationId, timer) => {
     bind(leadData[column] ?? null, "text"),
   );
   const updatedAtParam = bind(new Date(), "timestamp(3)");
+  const receivedAtParams = receivedAt
+    ? [bind(receivedAt, "timestamp(3)"), bind(receivedAt, "timestamp(3)")]
+    : [];
 
   const columns = [
     "id",
     ...LEAD_INSERT_COLUMNS,
     "organizationId",
     "updatedAt",
+    ...(receivedAt ? ["date", "createdAt"] : []),
     ...(leadModelHasOrgLeadId ? ["orgLeadId"] : []),
   ]
     .map((column) => `"${column}"`)
@@ -89,6 +105,7 @@ const createLead = async (leadData, usageUserId, organizationId, timer) => {
     ...leadValueParams,
     orgIdParam,
     updatedAtParam,
+    ...receivedAtParams,
     ...(leadModelHasOrgLeadId ? ['counter."nextValue"'] : []),
   ].join(", ");
 
@@ -159,17 +176,19 @@ const handleDuplicateLead = async (
   res,
   timer,
   logFields,
+  options = {},
 ) => {
   const duplicateLead = await createLead(
     { ...leadData, status: "Duplicate" },
     principalWithCampaign.usageUserId,
     organizationId,
     timer,
+    options.receivedAt,
   );
 
   // Send response immediately, handle webhook asynchronously
   const route = principalWithCampaign.campaigns[0]?.route;
-  if (route?.hasWebhook) {
+  if (route?.hasWebhook && !options.skipWebhook) {
     // Fire and forget - don't block response
     handleWebhookAsync(route, duplicateLead, req.log).catch((err) => {
       (req.log || logger).error(
@@ -205,17 +224,19 @@ const handleNewLead = async (
   res,
   timer,
   logFields,
+  options = {},
 ) => {
   const lead = await createLead(
     leadData,
     principalWithCampaign.usageUserId,
     organizationId,
     timer,
+    options.receivedAt,
   );
 
   // Send response immediately, handle webhook asynchronously
   const route = principalWithCampaign.campaigns[0]?.route;
-  if (route?.hasWebhook) {
+  if (route?.hasWebhook && !options.skipWebhook) {
     // Fire and forget - don't block response
     handleWebhookAsync(route, lead, req.log).catch((err) => {
       (req.log || logger).error(
@@ -379,8 +400,8 @@ const resolveLeadOrganizationId = async (
 };
 // ----- END utility functions ------
 
-// Extract common lead processing logic
-const processLeadRequest = async (req, res, source) => {
+// Extract common lead processing logic. `options` comes from replayLead only.
+const processLeadRequest = async (req, res, source, options = {}) => {
   const timer = req.timer;
   timer?.time("handler:addLead");
   const data = source === "body" ? req.body : req.query;
@@ -400,9 +421,10 @@ const processLeadRequest = async (req, res, source) => {
   // Carried on every outcome line for this attempt, so one search by key or
   // campaign returns the whole picture. The key itself is never logged.
   const logFields = {
-    src: source === "body" ? "api-post" : "api-get",
+    src: options.receivedAt ? "replay" : source === "body" ? "api-post" : "api-get",
     campId,
     keyFp: fingerprintApiKey(apiKey),
+    ...(options.receivedAt ? { receivedAt: options.receivedAt.toISOString() } : {}),
   };
 
   // Validation
@@ -571,6 +593,7 @@ const processLeadRequest = async (req, res, source) => {
         res,
         timer,
         { ...logFields, leadPeriod: campaign.lead_period },
+        options,
       );
       timer?.timeEnd("step:handleDuplicateLead");
       timer?.timeEnd("handler:addLead");
@@ -586,11 +609,22 @@ const processLeadRequest = async (req, res, source) => {
       res,
       timer,
       logFields,
+      options,
     );
     timer?.timeEnd("step:handleNewLead");
     timer?.timeEnd("handler:addLead");
     return newLeadResponse;
   } catch (error) {
+    // Database down: 503 so the sender retries instead of dropping the lead.
+    if (isDatabaseUnavailable(error)) {
+      logLeadOutcome(req, {
+        ...logFields,
+        outcome: "db_unavailable",
+        status: 503,
+        err: error,
+      });
+      return sendDatabaseUnavailable(req, res);
+    }
     // The response is a 400 for the caller, but reaching here is a server-side
     // failure, so it is logged at error level.
     logLeadOutcome(req, {
@@ -614,6 +648,41 @@ const addLead = async (req, res) => {
 
 const addLeadGet = async (req, res) => {
   return processLeadRequest(req, res, "query");
+};
+
+// Re-runs a payload recovered from the logs (scripts/replay-leads-from-logs.js)
+// through the normal ingestion path, keeping its original arrival time.
+// Returns { status, body } instead of writing to a socket.
+const replayLead = async ({ body, receivedAt, reqId, ip, log, skipWebhook }) => {
+  const req = {
+    id: reqId,
+    body,
+    query: {},
+    headers: ip ? { "x-forwarded-for": ip } : {},
+    log,
+    timer: undefined,
+    principal: undefined,
+  };
+  const result = {};
+  const res = {
+    status(code) {
+      result.status = code;
+      return this;
+    },
+    json(payload) {
+      result.body = payload;
+      return this;
+    },
+    setHeader() {
+      return this;
+    },
+  };
+
+  await processLeadRequest(req, res, "body", {
+    receivedAt: receivedAt ? new Date(receivedAt) : undefined,
+    skipWebhook: !!skipWebhook,
+  });
+  return result;
 };
 
 const updateLead = async (req, res) => {
@@ -650,5 +719,6 @@ const updateLead = async (req, res) => {
 module.exports = {
   addLead,
   addLeadGet,
+  replayLead,
   updateLead,
 };
