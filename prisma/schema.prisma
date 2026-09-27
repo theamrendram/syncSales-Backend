@@ -55,7 +55,6 @@ model User {
 
   sessions                Session[]
   accounts                Account[]
-  memberships             Member[]
   sentInvitations         Invitation[]         @relation("InvitationInviter")
 }
 
@@ -101,7 +100,6 @@ model Organization {
   orgLeadCounter OrgLeadCounter?
   resourceAccess AccessControl[]
 
-  authMembers    Member[]
   invitations    Invitation[]
 
   @@index([ownerId])
@@ -121,7 +119,6 @@ model Role {
   organizationId String
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
-  members        OrganizationMember[]
   organization   Organization         @relation(fields: [organizationId], references: [id])
 
   @@unique([name, organizationId])
@@ -132,18 +129,24 @@ model OrganizationMember {
   id             String       @id @default(uuid())
   userId         String
   organizationId String
-  roleId         String
-  status         MemberStatus @default(active)
+  // A Role.name within this organization, not a foreign key. Role is
+  // @@unique([name, organizationId]) so the pair identifies a role row exactly as
+  // well as an id did, and storing the name is what lets the Better Auth
+  // organization plugin read this table directly — it expects a role name.
+  //
+  // Deliberately not an FK: the plugin writes role names of its own (its default
+  // is "member"), and a constraint would turn that into a failed insert rather
+  // than a role that simply grants nothing. permissionsForRole() already falls
+  // back to the least-privileged role for an unknown name, which fails closed.
+  role           String       @default("viewer")
   joinedAt       DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id])
-  role           Role         @relation(fields: [roleId], references: [id])
   user           User         @relation(fields: [userId], references: [id])
 
   @@unique([userId, organizationId])
   @@index([userId])
   @@index([organizationId])
-  @@index([roleId])
 }
 
 model UserPlan {
@@ -366,24 +369,20 @@ enum Status {
   inactive
 }
 
-enum MemberStatus {
-  active
-  inactive
-  pending
-  suspended
-}
-
 // ---------------------------------------------------------------------------
 // Better Auth
 //
-// Session/Account/Verification are the core identity tables. Member and
-// Invitation belong to the organization plugin and sit alongside the legacy
-// Role + OrganizationMember tables during the migration; the legacy pair is
-// removed once every read path has moved over.
+// Session/Account/Verification are the core identity tables. Invitation belongs
+// to the organization plugin.
 //
-// Permissions are deliberately NOT stored here. Member.role holds a role name
-// that indexes into src/lib/org-roles.js, which is what keeps
-// requireOrgPermission() and its call sites unchanged.
+// The plugin has no membership table of its own: src/lib/auth.js points its
+// `member` model at OrganizationMember, which is why that table stores the role
+// as a *name* rather than a foreign key — the plugin expects a name. One table
+// serves both the plugin and the permission layer.
+//
+// Permissions are not stored on the membership. OrganizationMember.role names a
+// Role row within the same organization (Role is @@unique([name, organizationId])),
+// and that row carries the resource:action grants.
 // ---------------------------------------------------------------------------
 
 model Session {
@@ -443,22 +442,6 @@ model Verification {
 
   @@index([identifier])
   @@index([expiresAt])
-}
-
-model Member {
-  id             String   @id @default(uuid())
-  organizationId String
-  userId         String
-  // One of the names in src/lib/org-roles.js: owner | admin | manager | viewer
-  role           String   @default("viewer")
-  createdAt      DateTime @default(now())
-
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, organizationId])
-  @@index([organizationId])
-  @@index([userId])
 }
 
 model Invitation {

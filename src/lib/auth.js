@@ -17,6 +17,7 @@ import {
 import { ORG_ROLES, DEFAULT_ROLE } from "./org-roles.js";
 import { DEFAULT_ORG_ROLES } from "../utils/default-org-roles.js";
 import { generateKey } from "../utils/generate-key.js";
+import { upsertMembership } from "./membership.js";
 
 const APP_URL = process.env.APP_URL || "http://localhost:3000";
 const CRM_URL = process.env.CRM_URL || "http://localhost:3001";
@@ -211,6 +212,14 @@ export const auth = betterAuth({
       // role names index into src/lib/org-roles.js, so requireOrgPermission()
       // and every route that calls it keep working untouched.
       schema: {
+        // The plugin reads and writes OrganizationMember directly rather than a
+        // Member table of its own. That is the whole point of storing the role as
+        // a name: the plugin expects one, and cannot be pointed at a uuid foreign
+        // key. `createdAt` is this table's `joinedAt`.
+        member: {
+          modelName: "OrganizationMember",
+          fields: { createdAt: "joinedAt" },
+        },
         organization: {
           // Same stripping rule as User.additionalFields above: without this
           // declaration, the ownerId injected by beforeCreateOrganization is
@@ -260,33 +269,14 @@ export const auth = betterAuth({
                 skipDuplicates: true,
               });
 
-              const ownerRole = await tx.role.findFirst({
-                where: { organizationId: organization.id, name: "owner" },
-                select: { id: true },
-              });
-              if (!ownerRole) return;
-
-              await tx.organizationMember.upsert({
-                where: {
-                  userId_organizationId: {
-                    userId: user.id,
-                    organizationId: organization.id,
-                  },
-                },
-                update: { roleId: ownerRole.id, status: "active" },
-                create: {
-                  userId: user.id,
-                  organizationId: organization.id,
-                  roleId: ownerRole.id,
-                  status: "active",
-                },
-              });
-
-              // Mirrors the legacy createOrganization behaviour: the owner's
-              // own rows move under the organization they just created.
-              await tx.user.update({
-                where: { id: user.id },
-                data: { organizationId: organization.id },
+              // Membership goes through the shared helper, which also fills
+              // User.organizationId — the only organization the API-key path can
+              // see, since it has no session to carry an active one.
+              await upsertMembership({
+                client: tx,
+                userId: user.id,
+                organizationId: organization.id,
+                role: "owner",
               });
             });
           } catch (err) {

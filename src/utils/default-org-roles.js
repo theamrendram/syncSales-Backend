@@ -1,84 +1,43 @@
 import prisma from "./prismaClient.js";
+import {
+  ORG_ROLES,
+  ROLE_DESCRIPTIONS,
+  ROLE_PERMISSIONS,
+} from "../lib/org-roles.js";
+import { parseRolePermissions } from "./role-permissions-schema.js";
 
 /**
- * Seeded roles for each organization (same shape as organization signup).
- * Webmasters use the "viewer" membership role; effective API permissions
- * for users with WebmasterProfile are overridden in auth middleware.
+ * The Role rows every organization gets.
+ *
+ * Derived from src/lib/org-roles.js rather than restated here. It used to be a
+ * hand-copied duplicate of ROLE_PERMISSIONS, which is exactly the drift this
+ * table is vulnerable to: the seed and the code that interprets a role were two
+ * lists that had to be kept identical by hand, and nothing checked.
+ *
+ * Permissions are parsed on the way out, so a malformed entry fails here rather
+ * than reaching the database and being read back as authority later.
  */
-const DEFAULT_ORG_ROLES = [
-  {
-    name: "owner",
-    description: "Full access to all features",
-    permissions: {
-      canManageOrganization: true,
-      canManageMembers: true,
-      canManageRoles: true,
-      canViewAllData: true,
-      canEditAllData: true,
-      canDeleteData: true,
-      canManageBilling: true,
-    },
-  },
-  {
-    name: "admin",
-    description: "Administrative access",
-    permissions: {
-      canManageOrganization: false,
-      canManageMembers: true,
-      canManageRoles: false,
-      canViewAllData: true,
-      canEditAllData: true,
-      canDeleteData: true,
-      canManageBilling: false,
-    },
-  },
-  {
-    name: "manager",
-    description: "Manager access",
-    permissions: {
-      canManageOrganization: false,
-      canManageMembers: false,
-      canManageRoles: false,
-      canViewAllData: true,
-      canEditAllData: true,
-      canDeleteData: false,
-      canManageBilling: false,
-    },
-  },
-  {
-    name: "viewer",
-    description: "Read-only access",
-    permissions: {
-      canManageOrganization: false,
-      canManageMembers: false,
-      canManageRoles: false,
-      canViewAllData: true,
-      canEditAllData: false,
-      canDeleteData: false,
-      canManageBilling: false,
-    },
-  },
-];
+const DEFAULT_ORG_ROLES = ORG_ROLES.map((name) => ({
+  name,
+  description: ROLE_DESCRIPTIONS[name] ?? name,
+  permissions: parseRolePermissions(ROLE_PERMISSIONS[name]),
+}));
 
 /**
- * Creates any missing default roles (e.g. org created before role seeding existed).
+ * Creates any role rows this organization is missing.
+ *
+ * Needed for organizations that predate a role being added — including ones
+ * created before role seeding existed at all, which is why it checks each name
+ * rather than counting.
  */
 async function ensureDefaultRolesForOrganization(organizationId) {
-  for (const def of DEFAULT_ORG_ROLES) {
-    const existing = await prisma.role.findFirst({
-      where: { organizationId, name: def.name },
-    });
-    if (!existing) {
-      await prisma.role.create({
-        data: {
-          name: def.name,
-          description: def.description,
-          permissions: def.permissions,
-          organizationId,
-        },
-      });
-    }
-  }
+  await prisma.role.createMany({
+    data: DEFAULT_ORG_ROLES.map((def) => ({ ...def, organizationId })),
+    // Role is @@unique([name, organizationId]), so existing rows are left
+    // untouched rather than overwritten — an organization that has customised a
+    // role should not have it reset by a seed.
+    skipDuplicates: true,
+  });
 }
 
 export { DEFAULT_ORG_ROLES, ensureDefaultRolesForOrganization };

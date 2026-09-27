@@ -17,9 +17,9 @@
  *   3. Organization.slug   derived from name, deduplicated. The organization
  *                         plugin looks organizations up by slug; existing rows
  *                         migrate as NULL and would be invisible to it.
- *   4. Member             mirrored from OrganizationMember, mapping Role.name
- *                         onto the fixed names in src/lib/org-roles.js. The two
- *                         tables coexist during the transition.
+ *   (The Member backfill this script used to run is gone: the organization
+ *   plugin reads OrganizationMember directly now, so there is no second
+ *   membership table to mirror into.)
  *
  * Nothing here touches Lead, Route, Campaign or LeadUsage.
  */
@@ -115,57 +115,11 @@ async function backfillOrgSlugs(plan) {
   }
 }
 
-async function backfillMembers(plan) {
-  const legacy = await prisma.organizationMember.findMany({
-    select: {
-      userId: true,
-      organizationId: true,
-      status: true,
-      role: { select: { name: true } },
-      user: { select: { email: true } },
-    },
-  });
-
-  for (const m of legacy) {
-    const existing = await prisma.member.findUnique({
-      where: {
-        userId_organizationId: {
-          userId: m.userId,
-          organizationId: m.organizationId,
-        },
-      },
-      select: { id: true },
-    });
-    if (existing) continue;
-
-    // Unrecognised legacy role names fall to the least-privileged role rather
-    // than being invented, so a bad name can never widen access.
-    const raw = m.role?.name;
-    const role = isKnownRole(raw) ? raw : DEFAULT_ROLE;
-    const note = raw === role ? role : `${raw ?? "<none>"} -> ${role}`;
-
-    plan.push({
-      what: "Member",
-      who: `${m.user?.email ?? m.userId} @ ${m.organizationId.slice(0, 8)}`,
-      detail: `role ${note}${m.status !== "active" ? ` (legacy status ${m.status})` : ""}`,
-      run: () =>
-        prisma.member.create({
-          data: {
-            userId: m.userId,
-            organizationId: m.organizationId,
-            role,
-          },
-        }),
-    });
-  }
-}
-
 async function main() {
   const plan = [];
   await backfillUserNames(plan);
   await backfillEmailVerified(plan);
   await backfillOrgSlugs(plan);
-  await backfillMembers(plan);
 
   if (plan.length === 0) {
     console.log("Nothing to backfill — already consistent.");

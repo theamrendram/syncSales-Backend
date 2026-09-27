@@ -360,7 +360,6 @@ const resolveLeadOrganizationId = async (
   const membership = await prismaClient.organizationMember.findFirst({
     where: {
       userId: principalWithCampaign.id,
-      status: "active",
     },
     select: {
       organizationId: true,

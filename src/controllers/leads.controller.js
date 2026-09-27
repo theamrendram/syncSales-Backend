@@ -42,10 +42,9 @@ const getUserWithMemberships = async (userId) =>
       email: true,
       webmasterProfile: { select: { userId: true } },
       organizationMemberships: {
-        where: { status: "active" },
-        select: {
+          select: {
           organizationId: true,
-          role: { select: { name: true, permissions: true } },
+          role: true,
         },
       },
     },
@@ -303,14 +302,9 @@ const addLead = async (req, res) => {
           select: { isActive: true },
         },
         organizationMemberships: {
-          where: { status: "active" },
-          select: {
-            organizationId: true,
-            role: {
               select: {
-                permissions: true,
-              },
-            },
+            organizationId: true,
+            role: true,
           },
         },
         ownedCampaigns: {

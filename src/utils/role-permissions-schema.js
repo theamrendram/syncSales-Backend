@@ -1,29 +1,21 @@
 import { z } from "zod";
+import { PERMISSIONS, toPermissionList } from "../lib/org-roles.js";
 
-const PERMISSION_KEYS = [
-  "canManageOrganization",
-  "canManageMembers",
-  "canManageRoles",
-  "canViewAllData",
-  "canEditAllData",
-  "canDeleteData",
-  "canManageBilling",
-];
-
-/** Fixed preset for users with WebmasterProfile (read-only; scope by campaign links). */
-const WEBMASTER_PERMISSIONS = {
-  canManageOrganization: false,
-  canManageMembers: false,
-  canManageRoles: false,
-  canViewAllData: true,
-  canEditAllData: false,
-  canDeleteData: false,
-  canManageBilling: false,
-};
-
-const rolePermissionsSchema = z.object(
-  Object.fromEntries(PERMISSION_KEYS.map((k) => [k, z.boolean()]))
-);
+/**
+ * Validation for a stored `Role.permissions` value.
+ *
+ * The stored shape is a list of `resource:action` strings, each of which must be
+ * one the catalog in src/lib/org-roles.js defines. Rejecting unknown strings on
+ * the way in is the point: a permission that exists in the table but nowhere in
+ * code is either a typo that silently denies, or a grant someone expects to be
+ * honoured and which never will be.
+ *
+ * Duplicates are collapsed rather than rejected — a list naming the same grant
+ * twice means exactly what it says.
+ */
+const rolePermissionsSchema = z
+  .array(z.enum(PERMISSIONS))
+  .transform((list) => [...new Set(list)]);
 
 function parseRolePermissions(input) {
   return rolePermissionsSchema.parse(input);
@@ -33,4 +25,20 @@ function safeParseRolePermissions(input) {
   return rolePermissionsSchema.safeParse(input);
 }
 
-export { PERMISSION_KEYS, WEBMASTER_PERMISSIONS, rolePermissionsSchema, parseRolePermissions, safeParseRolePermissions };
+/**
+ * Parse a value that may still be in the legacy boolean-object shape.
+ *
+ * For reading rows written before permissions became strings. Writes should use
+ * parseRolePermissions, which refuses the old shape outright.
+ */
+function parseStoredRolePermissions(input) {
+  return rolePermissionsSchema.parse(toPermissionList(input));
+}
+
+export {
+  PERMISSIONS,
+  rolePermissionsSchema,
+  parseRolePermissions,
+  safeParseRolePermissions,
+  parseStoredRolePermissions,
+};

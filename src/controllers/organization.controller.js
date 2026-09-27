@@ -1,5 +1,6 @@
 import prisma from "../utils/prismaClient.js";
 import { DEFAULT_ORG_ROLES } from "../utils/default-org-roles.js";
+import { upsertMembership, removeMembership } from "../lib/membership.js";
 
 // Create a new organization
 const createOrganization = async (req, res) => {
@@ -54,15 +55,13 @@ const createOrganization = async (req, res) => {
       )
     );
 
-    // Add owner as member with owner role
-    const ownerRole = roles.find((role) => role.name === "owner");
-    await prisma.organizationMember.create({
-      data: {
-        userId,
-        organizationId: organization.id,
-        roleId: ownerRole.id,
-        status: "active",
-      },
+    // Owner membership through the shared helper, which also fills
+    // User.organizationId. This path used to write OrganizationMember only, which
+    // is how organizations created here ended up invisible to the API-key path.
+    await upsertMembership({
+      userId,
+      organizationId: organization.id,
+      role: "owner",
     });
 
     res.status(201).json({
@@ -165,8 +164,7 @@ const updateOrganization = async (req, res) => {
       });
     }
 
-    const permissions = req.authContext.permissions;
-    if (!permissions?.canManageOrganization) {
+    if (!req.authContext.can("organization:manage")) {
       return res.status(403).json({
         success: false,
         message:
@@ -213,7 +211,7 @@ const updateOrganization = async (req, res) => {
 const addMember = async (req, res) => {
   try {
     const { organizationId } = req.params;
-    const { email, roleId } = req.body;
+    const { email, role: roleName, roleId } = req.body;
 
     if (
       !req.authContext ||
@@ -225,8 +223,7 @@ const addMember = async (req, res) => {
       });
     }
 
-    const permissions = req.authContext.permissions;
-    if (!permissions?.canManageMembers) {
+    if (!req.authContext.can("member:manage")) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You do not have permission to manage members.",
@@ -260,12 +257,12 @@ const addMember = async (req, res) => {
       });
     }
 
-    // Verify role exists and belongs to organization
+    // Membership stores a role name. Callers that still send the old roleId get
+    // it resolved rather than refused, so an existing integration keeps working.
     const role = await prisma.role.findFirst({
-      where: {
-        id: roleId,
-        organizationId,
-      },
+      where: roleName
+        ? { name: roleName, organizationId }
+        : { id: roleId, organizationId },
     });
 
     if (!role) {
@@ -275,14 +272,14 @@ const addMember = async (req, res) => {
       });
     }
 
-    // Add member
-    const newMember = await prisma.organizationMember.create({
-      data: {
-        userId: user.id,
-        organizationId,
-        roleId,
-        status: "active",
-      },
+    await upsertMembership({
+      userId: user.id,
+      organizationId,
+      role: role.name,
+    });
+
+    const newMember = await prisma.organizationMember.findFirst({
+      where: { userId: user.id, organizationId },
       include: {
         user: {
           select: {
@@ -326,8 +323,7 @@ const removeMember = async (req, res) => {
       });
     }
 
-    const permissions = req.authContext.permissions;
-    if (!permissions?.canManageMembers) {
+    if (!req.authContext.can("member:manage")) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You do not have permission to manage members.",
@@ -363,9 +359,11 @@ const removeMember = async (req, res) => {
       });
     }
 
-    // Remove member
-    await prisma.organizationMember.delete({
-      where: { id: memberId },
+    // Through the helper so removal has one definition, and so it stays paired
+    // with the add path if either gains a second table to maintain.
+    await removeMembership({
+      userId: member.userId,
+      organizationId,
     });
 
     res.json({
@@ -400,7 +398,6 @@ const getMembers = async (req, res) => {
     const members = await prisma.organizationMember.findMany({
       where: {
         organizationId,
-        status: "active",
       },
       include: {
         user: {

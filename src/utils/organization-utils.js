@@ -6,7 +6,6 @@ const getUserOrganizationContext = async (userId) => {
     const memberships = await prisma.organizationMember.findMany({
       where: {
         userId,
-        status: "active",
       },
       include: {
         organization: {
@@ -18,13 +17,7 @@ const getUserOrganizationContext = async (userId) => {
             logo: true,
           },
         },
-        role: {
-          select: {
-            id: true,
-            name: true,
-            permissions: true,
-          },
-        },
+        role: true,
       },
     });
 
@@ -69,7 +62,6 @@ const checkDataAccess = async (userId, dataId, dataType, organizationId) => {
       where: {
         userId,
         organizationId,
-        status: "active",
       },
       include: {
         role: true,
@@ -163,7 +155,6 @@ const getOrganizationStats = async (organizationId) => {
       prisma.organizationMember.count({
         where: {
           organizationId,
-          status: "active",
         },
       }),
       prisma.payment.count({ where: { organizationId } }),
@@ -231,7 +222,6 @@ const getPrimaryOrganization = async (userId) => {
     const membership = await prisma.organizationMember.findFirst({
       where: {
         userId,
-        status: "active",
       },
       include: {
         organization: {
@@ -243,13 +233,7 @@ const getPrimaryOrganization = async (userId) => {
             logo: true,
           },
         },
-        role: {
-          select: {
-            id: true,
-            name: true,
-            permissions: true,
-          },
-        },
+        role: true,
       },
       orderBy: {
         joinedAt: "asc",

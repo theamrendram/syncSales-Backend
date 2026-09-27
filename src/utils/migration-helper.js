@@ -1,4 +1,5 @@
 import prisma from "./prismaClient.js";
+import { DEFAULT_ORG_ROLES } from "./default-org-roles.js";
 
 // Migration script to set up organizations for existing users
 const migrateExistingUsersToOrganizations = async () => {
@@ -31,61 +32,10 @@ const migrateExistingUsersToOrganizations = async () => {
 
         console.log(`Created organization: ${organization.name}`);
 
-        // Create default roles
-        const defaultRoles = [
-          {
-            name: "owner",
-            description: "Full access to all features",
-            permissions: {
-              canManageOrganization: true,
-              canManageMembers: true,
-              canManageRoles: true,
-              canViewAllData: true,
-              canEditAllData: true,
-              canDeleteData: true,
-              canManageBilling: true,
-            },
-          },
-          {
-            name: "admin",
-            description: "Administrative access",
-            permissions: {
-              canManageOrganization: false,
-              canManageMembers: true,
-              canManageRoles: false,
-              canViewAllData: true,
-              canEditAllData: true,
-              canDeleteData: true,
-              canManageBilling: false,
-            },
-          },
-          {
-            name: "manager",
-            description: "Manager access",
-            permissions: {
-              canManageOrganization: false,
-              canManageMembers: false,
-              canManageRoles: false,
-              canViewAllData: true,
-              canEditAllData: true,
-              canDeleteData: false,
-              canManageBilling: false,
-            },
-          },
-          {
-            name: "viewer",
-            description: "Read-only access",
-            permissions: {
-              canManageOrganization: false,
-              canManageMembers: false,
-              canManageRoles: false,
-              canViewAllData: true,
-              canEditAllData: false,
-              canDeleteData: false,
-              canManageBilling: false,
-            },
-          },
-        ];
+        // Seeded from the shared catalog rather than restated here. This file
+        // used to hold a third copy of the role permissions, which is how two of
+        // them silently fell behind when the scheme changed.
+        const defaultRoles = DEFAULT_ORG_ROLES;
 
         const roles = await Promise.all(
           defaultRoles.map((role) =>
@@ -106,8 +56,7 @@ const migrateExistingUsersToOrganizations = async () => {
           data: {
             userId: user.id,
             organizationId: organization.id,
-            roleId: ownerRole.id,
-            status: "active",
+            role: ownerRole.name,
           },
         });
 
@@ -132,8 +81,7 @@ const migrateExistingUsersToOrganizations = async () => {
               data: {
                 userId: wmUser.id,
                 organizationId: organization.id,
-                roleId: viewerRole.id,
-                status: "active",
+                role: viewerRole.name,
               },
             });
             console.log(`Added webmaster user ${wmUser.email} as viewer member`);

@@ -4,10 +4,10 @@ import { requireOrgPermission } from "../middlewares/authentication-context.midd
 
 const router = express.Router();
 
-router.post("/", requireOrgPermission("canEditAllData"), addRoute);
-router.get("/", requireOrgPermission("canViewAllData"), getRoutes);
-router.get("/:id", requireOrgPermission("canViewAllData"), getRouteById);
-router.put("/:id", requireOrgPermission("canEditAllData"), editRoute);
-router.delete("/:id", requireOrgPermission("canDeleteData"), deleteRouteById);
+router.post("/", requireOrgPermission("route:write"), addRoute);
+router.get("/", requireOrgPermission("route:read"), getRoutes);
+router.get("/:id", requireOrgPermission("route:read"), getRouteById);
+router.put("/:id", requireOrgPermission("route:write"), editRoute);
+router.delete("/:id", requireOrgPermission("route:delete"), deleteRouteById);
 
 export default router;

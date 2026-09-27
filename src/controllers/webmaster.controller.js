@@ -2,8 +2,8 @@ import prismaClient from "../utils/prismaClient.js";
 import auth from "../lib/auth.js";
 import logger from "../utils/logger.js";
 import { generateKey } from "../utils/generate-key.js";
-import { DEFAULT_ROLE } from "../lib/org-roles.js";
 import { ensureDefaultRolesForOrganization } from "../utils/default-org-roles.js";
+import { DEFAULT_ROLE } from "../lib/org-roles.js";
 import { getExplicitRouteIdsForWebmaster } from "../utils/webmaster-campaigns.js";
 
 const getOwnerOrganization = async (userId) => {
@@ -81,10 +81,13 @@ const addWebmaster = async (req, res) => {
     // above would then refuse to let anyone recreate.
     await ensureDefaultRolesForOrganization(ownerOrganization.id);
 
+    // A webmaster is an ordinary read-only member. What makes them a webmaster is
+    // the WebmasterProfile created below plus the campaigns linked to them, which
+    // narrow which rows they see — not their role, which grants only reads.
     const memberRole = await prismaClient.role.findFirst({
       where: {
         organizationId: ownerOrganization.id,
-        name: "viewer",
+        name: DEFAULT_ROLE,
       },
     });
 
@@ -127,17 +130,7 @@ const addWebmaster = async (req, res) => {
         organizationMemberships: {
           create: {
             organizationId: ownerOrganization.id,
-            roleId: memberRole.id,
-            status: "active",
-          },
-        },
-        // Written alongside the legacy row so the organization plugin sees the
-        // membership too. Both tables are maintained until the legacy pair is
-        // removed.
-        memberships: {
-          create: {
-            organizationId: ownerOrganization.id,
-            role: DEFAULT_ROLE,
+            role: memberRole.name,
           },
         },
       },
@@ -246,7 +239,6 @@ const getWebmasters = async (req, res) => {
         organizationMemberships: {
           some: {
             organizationId: ownerOrganization.id,
-            status: "active",
           },
         },
       },
@@ -286,7 +278,6 @@ const getWebmasterById = async (req, res) => {
         organizationMemberships: {
           some: {
             organizationId: ownerOrganization.id,
-            status: "active",
           },
         },
       },
@@ -328,7 +319,6 @@ const updateWebmaster = async (req, res) => {
         organizationMemberships: {
           some: {
             organizationId: ownerOrganization?.id,
-            status: "active",
           },
         },
       },
@@ -461,7 +451,6 @@ const deleteWebmaster = async (req, res) => {
         organizationMemberships: {
           some: {
             organizationId: ownerOrganization?.id,
-            status: "active",
           },
         },
       },

@@ -1,16 +1,65 @@
 /**
- * Organization roles, as code.
+ * Organization roles and permissions.
+ *
+ * Permissions are `resource:action` strings — `campaign:read`, `route:delete`,
+ * `member:manage`. The previous scheme was seven flat booleans
+ * (`canViewAllData`, `canEditAllData`, `canDeleteData`, …) where the three data
+ * keys covered *every* resource at once: a role that could edit campaigns could
+ * necessarily edit routes, and nothing could express otherwise. Naming the
+ * resource makes the guard on a route say what it actually protects, and makes
+ * narrower roles possible without inventing more booleans.
+ *
+ * A role grants a list. Anything not listed is denied — there are no negative
+ * grants, so a missing permission and a refused one are the same thing and no
+ * caller has to tell them apart.
  *
  * These four roles were already frozen: role.controller.js rejects create,
- * update and delete with "Custom role creation is disabled for this release",
- * so the `Role` table only ever held four rows per organization, seeded
- * identically every time. Holding them in a table bought nothing and cost a
- * join on permission checks, so they live here now.
+ * update and delete, so the `Role` table only ever holds these rows per
+ * organization. They live here, and src/utils/default-org-roles.js seeds the
+ * table from them rather than restating them.
  *
- * Better Auth's organization plugin stores a role *name* on each member row.
- * That name indexes into this map, which keeps `requireOrgPermission("...")`
- * working with the same permission keys the middleware and routes already use.
+ * There is deliberately no "webmaster" here. A webmaster is a member whose role
+ * grants reads and whose *rows* are narrowed to the campaigns linked to them —
+ * which is resource access, a later stage than permissions, and something no
+ * permission string can express. Making it a role said nothing the role list did
+ * not already say, and put a scoping concern in the permission catalog.
  */
+
+/** Everything a permission can be granted over. */
+export const RESOURCES = [
+  "organization",
+  "member",
+  "role",
+  "billing",
+  "lead",
+  "campaign",
+  "route",
+];
+
+/**
+ * read/write/delete apply to the data resources; manage is for the
+ * administrative ones, where a partial grant would be meaningless — there is no
+ * useful "can read billing but not change it" in this product.
+ */
+export const DATA_RESOURCES = ["lead", "campaign", "route"];
+// Adding, editing and removing webmasters is member management, so it needs no
+// resource of its own — `member:manage` covers it.
+export const ADMIN_RESOURCES = ["organization", "member", "role", "billing"];
+
+export const READ = "read";
+export const WRITE = "write";
+export const DELETE = "delete";
+export const MANAGE = "manage";
+
+const dataPermissions = (action) => DATA_RESOURCES.map((r) => `${r}:${action}`);
+
+/** Every permission string that exists. Anything else is invalid, not merely ungranted. */
+export const PERMISSIONS = [
+  ...ADMIN_RESOURCES.map((r) => `${r}:${MANAGE}`),
+  ...dataPermissions(READ),
+  ...dataPermissions(WRITE),
+  ...dataPermissions(DELETE),
+];
 
 export const ORG_ROLES = ["owner", "admin", "manager", "viewer"];
 
@@ -24,53 +73,91 @@ export const ROLE_DESCRIPTIONS = {
 };
 
 export const ROLE_PERMISSIONS = {
-  owner: {
-    canManageOrganization: true,
-    canManageMembers: true,
-    canManageRoles: true,
-    canViewAllData: true,
-    canEditAllData: true,
-    canDeleteData: true,
-    canManageBilling: true,
-  },
-  admin: {
-    canManageOrganization: false,
-    canManageMembers: true,
-    canManageRoles: false,
-    canViewAllData: true,
-    canEditAllData: true,
-    canDeleteData: true,
-    canManageBilling: false,
-  },
-  manager: {
-    canManageOrganization: false,
-    canManageMembers: false,
-    canManageRoles: false,
-    canViewAllData: true,
-    canEditAllData: true,
-    canDeleteData: false,
-    canManageBilling: false,
-  },
-  viewer: {
-    canManageOrganization: false,
-    canManageMembers: false,
-    canManageRoles: false,
-    canViewAllData: true,
-    canEditAllData: false,
-    canDeleteData: false,
-    canManageBilling: false,
-  },
+  // Everything, including the administrative resources.
+  owner: [...PERMISSIONS],
+
+  // All data, and may manage members — but cannot change the organization
+  // itself, redefine roles, or touch billing. Unchanged from the previous
+  // canManage* booleans.
+  admin: [
+    "member:manage",
+    ...dataPermissions(READ),
+    ...dataPermissions(WRITE),
+    ...dataPermissions(DELETE),
+  ],
+
+  // Read and write, but never delete.
+  manager: [...dataPermissions(READ), ...dataPermissions(WRITE)],
+
+  viewer: [...dataPermissions(READ)],
 };
 
 /**
  * Permissions for a role name. Unknown or missing names collapse to the
- * least-privileged role rather than to "no permissions object", so callers
- * never have to distinguish "absent" from "denied".
+ * least-privileged role rather than to "no permissions at all", so callers never
+ * have to distinguish "absent" from "denied".
  */
 export function permissionsForRole(roleName) {
-  return ROLE_PERMISSIONS[roleName] ?? ROLE_PERMISSIONS[DEFAULT_ROLE];
+  return [...(ROLE_PERMISSIONS[roleName] ?? ROLE_PERMISSIONS[DEFAULT_ROLE])];
 }
 
 export function isKnownRole(roleName) {
   return Object.prototype.hasOwnProperty.call(ROLE_PERMISSIONS, roleName);
+}
+
+export function isKnownPermission(permission) {
+  return PERMISSIONS.includes(permission);
+}
+
+/** True when `permission` names a read action, whatever its resource. */
+export function isReadPermission(permission) {
+  return String(permission).endsWith(`:${READ}`);
+}
+
+/**
+ * The flat booleans this scheme replaced, mapped to what they granted.
+ *
+ * Rows written before the change still hold the old object, and a deploy lands
+ * before any repair script runs. Reading both shapes means the order of those
+ * two events cannot cause an outage — without it, every stored role would read
+ * as "no permissions" for the window in between, which fails closed but locks
+ * everyone out.
+ */
+const LEGACY_KEY_MAP = {
+  canManageOrganization: ["organization:manage"],
+  canManageMembers: ["member:manage"],
+  canManageRoles: ["role:manage"],
+  canManageBilling: ["billing:manage"],
+  canViewAllData: dataPermissions(READ),
+  canEditAllData: dataPermissions(WRITE),
+  canDeleteData: dataPermissions(DELETE),
+};
+
+/**
+ * A stored `Role.permissions` value as a list of permission strings.
+ *
+ * Accepts the current shape (an array of strings), the legacy shape (an object
+ * of booleans), and anything else as empty. Unknown strings are dropped rather
+ * than trusted, so a typo in the table cannot grant something real.
+ */
+export function toPermissionList(raw) {
+  if (Array.isArray(raw)) {
+    return raw.filter((p) => isKnownPermission(p));
+  }
+
+  if (raw && typeof raw === "object") {
+    const out = new Set();
+    for (const [key, granted] of Object.entries(raw)) {
+      if (granted !== true) continue;
+      // A row that already holds the new shape as object keys reads correctly too.
+      if (isKnownPermission(key)) {
+        out.add(key);
+        continue;
+      }
+      for (const p of LEGACY_KEY_MAP[key] ?? []) out.add(p);
+    }
+    return [...out];
+  }
+
+  return [];
 }

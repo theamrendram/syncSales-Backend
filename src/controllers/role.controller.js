@@ -83,7 +83,7 @@ const deleteRole = async (req, res) => {
 const updateMemberRole = async (req, res) => {
   try {
     const { organizationId, memberId } = req.params;
-    const { roleId } = req.body;
+    const { role: roleName, roleId } = req.body;
 
     if (!assertRoleRouteContext(req, organizationId)) {
       return res.status(403).json({
@@ -92,7 +92,7 @@ const updateMemberRole = async (req, res) => {
       });
     }
 
-    if (!req.authContext.permissions?.canManageMembers) {
+    if (!req.authContext.can("member:manage")) {
       return res.status(403).json({
         success: false,
         message: "Access denied. You do not have permission to manage members.",
@@ -115,7 +115,7 @@ const updateMemberRole = async (req, res) => {
 
     const newRole = await prisma.role.findFirst({
       where: {
-        id: roleId,
+        ...(roleName ? { name: roleName } : { id: roleId }),
         organizationId,
       },
     });
@@ -147,7 +147,7 @@ const updateMemberRole = async (req, res) => {
 
     const updatedMember = await prisma.organizationMember.update({
       where: { id: memberId },
-      data: { roleId },
+      data: { role: newRole.name },
       include: {
         user: {
           select: {
@@ -157,7 +157,6 @@ const updateMemberRole = async (req, res) => {
             email: true,
           },
         },
-        role: true,
       },
     });
 
