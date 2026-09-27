@@ -1,9 +1,8 @@
 /**
  * Session authentication — the Better Auth replacement for Clerk's requireAuth().
  *
- * Deliberately populates `req.auth = { userId }`, the exact shape
- * authentication-context.middleware.js already reads, so the organization and
- * permission layers need no changes when the identity provider swaps out.
+ * Populates `req.auth = { userId }`, the exact shape
+ * authentication-context.middleware.js already reads
  */
 import { fromNodeHeaders } from "better-auth/node";
 import auth from "../lib/auth.js";

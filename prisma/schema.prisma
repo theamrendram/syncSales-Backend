@@ -26,6 +26,16 @@ model User {
   emailVerified           Boolean              @default(false)
   image                   String?
   apiKey                  String               @unique @default("0")
+
+  // Better Auth admin plugin. Platform-level, and deliberately distinct from
+  // the organization roles in src/lib/org-roles.js: this one decides who may
+  // impersonate, not what anyone can do inside an organization. Admin rights
+  // come from ADMIN_USER_IDS in the environment, so this column stays null and
+  // exists only because the plugin selects it.
+  role                    String?
+  banned                  Boolean              @default(false)
+  banReason               String?
+  banExpires              DateTime?
   createdAt               DateTime             @default(now())
   updatedAt               DateTime             @updatedAt
   address                 String?
@@ -389,6 +399,11 @@ model Session {
   // Set by the organization plugin so the active org travels with the session
   // instead of costing a lookup on every request.
   activeOrganizationId String?
+
+  // Set by the admin plugin when this session was created by impersonation.
+  // Holds the admin's user id, and is the only record that a session is not
+  // really the user acting — treat it as the audit trail.
+  impersonatedBy       String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

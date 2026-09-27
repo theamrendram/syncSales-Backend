@@ -7,7 +7,7 @@ import express from "express";
 import { randomUUID } from "crypto";
 import cors from "cors";
 import pinoHttp from "pino-http";
-import { clerkMiddleware, requireAuth } from "@clerk/express";
+import { requireAuth } from "./middlewares/require-auth.middleware.js";
 import { toNodeHandler } from "better-auth/node";
 import auth from "./lib/auth.js";
 import { config } from "./config/env.js";
@@ -91,12 +91,6 @@ app.use(
     },
   }),
 );
-// Better Auth owns /api/auth/* and needs the raw body, so it is mounted ahead
-// of express.json() — the same ordering the Clerk webhook route already relies
-// on. CORS comes first so preflights on these routes still get their headers.
-// Defaults match src/lib/auth.js. The two must agree: an origin trusted for
-// auth but absent here has its preflight refused, and the browser reports that
-// only as an opaque "Failed to fetch".
 const allowedOrigins = [
   process.env.APP_URL || "http://localhost:3000",
   process.env.CRM_URL || "http://localhost:3001",
@@ -104,33 +98,21 @@ const allowedOrigins = [
 ].filter(Boolean);
 
 const corsOptions = {
-  // `credentials: true` is what carries the session cookie, and the CORS spec
-  // rejects it alongside a wildcard origin — hence the explicit allowlist.
   origin(origin, callback) {
-    // Same-origin and non-browser callers (curl, server-to-server, the lead
-    // ingestion API) send no Origin header at all.
+
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
-    // Withhold the CORS headers rather than throwing. Throwing here surfaces as
-    // an opaque 500 from the global error handler, which reads as a server bug;
-    // omitting the headers is what actually blocks the browser, and CORS is only
-    // ever enforced browser-side anyway.
     logger.warn({ origin }, "origin not in CORS allowlist");
     return callback(null, false);
   },
   credentials: true,
 };
 
-// Public ingestion endpoints keep a wildcard origin. They authenticate with an
-// API key in the body/query rather than a cookie, third parties post to them
-// from their own domains, and narrowing them to the allowlist would break every
-// existing integration. No credentials are involved, so the wildcard is safe.
 const publicCors = cors({ origin: "*", credentials: false });
 app.use("/api/v1/leads", publicCors);
 app.use("/api/v1/postback", publicCors);
 app.use("/webhook", publicCors);
 
-// Everything else is session-bearing and gets the credentialed allowlist.
 app.use(cors(corsOptions));
 
 app.all("/api/auth/*", toNodeHandler(auth));
@@ -151,7 +133,8 @@ app.get("/unauthenticated", (req, res) => {
   res.send("unauthenticated request");
 });
 
-app.use(clerkMiddleware());
+// requireAuth() resolves the Better Auth session per route. Clerk's
+// clerkMiddleware() used to sit here to populate req.auth for everything
 app.use("/api/v1/user", requireAuth(), userRoute);
 app.use(
   "/api/v1/routes",

@@ -3,8 +3,8 @@
  */
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
-import { organization } from "better-auth/plugins";
-import { APIError } from "better-auth/api";
+import { admin, organization } from "better-auth/plugins";
+import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 
 import prisma from "../utils/prismaClient.js";
 import logger from "../utils/logger.js";
@@ -21,6 +21,35 @@ import { generateKey } from "../utils/generate-key.js";
 const APP_URL = process.env.APP_URL || "http://localhost:3000";
 const CRM_URL = process.env.CRM_URL || "http://localhost:3001";
 const BASE_URL = process.env.BETTER_AUTH_URL || "http://localhost:8000";
+
+/**
+ * Who may impersonate another user.
+ *
+ * Deliberately from the environment rather than from User.role. Impersonation
+ * is full account takeover, so the list of people who can do it should not be
+ * grantable by a single UPDATE on a row — a database write should not be able
+ * to escalate anyone to it. Empty by default: no list, no impersonation.
+ */
+const ADMIN_USER_IDS = (process.env.ADMIN_USER_IDS || "")
+  .split(",")
+  .map((id) => id.trim())
+  .filter(Boolean);
+
+/**
+ * The same people, named by email.
+ *
+ * Two lists for one decision looks redundant, but they fail differently. Ids are
+ * what the admin plugin checks, and they are not stable across environments — a
+ * database reseed hands every user a new uuid, and ADMIN_USER_IDS then points at
+ * a row that no longer exists, which fails *open* in the sense that the intended
+ * admin silently loses access while a recycled id could in principle gain it.
+ * Emails survive a reseed. Checking both means a stale entry in either list
+ * denies rather than grants.
+ */
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
+  .split(",")
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean);
 
 /**
  * Cookies are shared across syncsales.in and its subdomains so one sign-in on
@@ -125,6 +154,27 @@ export const auth = betterAuth({
   trustedOrigins: [APP_URL, CRM_URL],
 
   databaseHooks: {
+    session: {
+      create: {
+        // Session.impersonatedBy is the only trace that a session is not really
+        // the user acting. A column nobody reads is not an audit trail, so every
+        // impersonated session is announced here, where the log pipeline already
+        // ships and retains it.
+        after: async (session) => {
+          if (session.impersonatedBy) {
+            logger.warn(
+              {
+                evt: "impersonation_started",
+                adminUserId: session.impersonatedBy,
+                targetUserId: session.userId,
+                sessionExpiresAt: session.expiresAt,
+              },
+              "admin impersonation session created",
+            );
+          }
+        },
+      },
+    },
     user: {
       create: {
         // Better Auth only knows `name`, but the rest of the codebase reads
@@ -260,7 +310,75 @@ export const auth = betterAuth({
         await sendEmail({ to: email, subject, html });
       },
     }),
+
+    // Impersonation, the replacement for the previous provider's "sign in as
+    // user". POST /api/auth/admin/impersonate-user swaps the caller's session
+    // cookie for one belonging to the target, and /admin/stop-impersonating
+    // puts it back. Nothing downstream needs to know: requireAuth() reads the
+    // session as usual, so the whole API acts as that user.
+    //
+    // Session.impersonatedBy holds the acting admin's id and is the only record
+    // that a session is not really the user, which is why it is logged below.
+    admin({
+      adminUserIds: ADMIN_USER_IDS,
+      // Shorter than a normal session on purpose. An impersonated session is a
+      // support tool, not a place to live, and it should lapse on its own if
+      // someone forgets to stop.
+      impersonationSessionDuration: 60 * 30,
+    }),
   ],
+
+  hooks: {
+    /**
+     * Independent check on every /admin/* endpoint.
+     *
+     * The admin plugin already gates these on ADMIN_USER_IDS. This does not
+     * replace that — it runs before it and asserts the caller's *email* is on
+     * ADMIN_EMAILS too, so both must agree. The plugin's list is the one that
+     * grants; this one can only take away.
+     *
+     * Why bother: the two lists fail in different directions, and an
+     * impersonated session must never be able to impersonate onward. A borrowed
+     * session's email is the target's, so it is refused here even if the target
+     * later appeared in ADMIN_USER_IDS.
+     */
+    before: createAuthMiddleware(async (ctx) => {
+      if (!ctx.path?.startsWith("/admin/")) return;
+
+      // The one /admin/* path that must stay open to a non-admin session.
+      // Stopping is how a borrowed session gets back to being the admin's, and
+      // by definition the caller's email is the target's at that moment — every
+      // check below would refuse it and strand whoever is impersonating. The
+      // endpoint itself is already safe: it only works on a session that carries
+      // impersonatedBy, and it can only return you to the admin who set it.
+      if (ctx.path === "/admin/stop-impersonating") return;
+
+      const session = await getSessionFromCtx(ctx).catch(() => null);
+      const email = String(session?.user?.email || "").toLowerCase();
+
+      if (!email || !ADMIN_EMAILS.includes(email)) {
+        logger.warn(
+          { evt: "admin_endpoint_denied", path: ctx.path, email: email || null },
+          "admin endpoint refused: caller not in ADMIN_EMAILS",
+        );
+        throw new APIError("NOT_FOUND", {
+          code: "NOT_FOUND",
+          message: "Not found",
+        });
+      }
+
+      if (session?.session?.impersonatedBy) {
+        logger.warn(
+          { evt: "admin_endpoint_denied", path: ctx.path, email },
+          "admin endpoint refused: session is impersonated",
+        );
+        throw new APIError("FORBIDDEN", {
+          code: "IMPERSONATED_SESSION",
+          message: "Not allowed while impersonating",
+        });
+      }
+    }),
+  },
 
   onAPIError: {
     onError: (error) => {
