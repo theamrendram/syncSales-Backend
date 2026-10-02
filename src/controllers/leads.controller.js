@@ -6,7 +6,11 @@ import { chartMetrics, generateExtendedReport, transformLeadsToChartData, getLea
 import logger from "../utils/logger.js";
 import { logLeadOutcome, fingerprintApiKey, phoneLast4 } from "../utils/lead-log.js";
 import { Parser } from "json2csv";
-import { getLeadScopeForWebmaster } from "../utils/webmaster-campaigns.js";
+import { resolveLeadScope } from "../utils/lead-scope.js";
+import {
+  getGrantedLeadScope,
+  hasResourceGrants,
+} from "../utils/resource-grants.js";
 
 const MAX_PAGE_LIMIT = 100;
 const MAX_EXPORT_LIMIT = 1000;
@@ -40,7 +44,6 @@ const getUserWithMemberships = async (userId) =>
     select: {
       id: true,
       email: true,
-      webmasterProfile: { select: { userId: true } },
       organizationMemberships: {
           select: {
           organizationId: true,
@@ -51,11 +54,11 @@ const getUserWithMemberships = async (userId) =>
   });
 
 const getLeadAccessWhereForUser = async (user, organizationId) => {
-  if (user.webmasterProfile) {
-    if (!organizationId) {
-      return { where: null, isEmpty: true };
-    }
-    const { campaignIds, routeIds } = await getLeadScopeForWebmaster(
+  // Narrowed by explicit grants rather than by a WebmasterProfile row, which no
+  // longer exists. Same rule as src/utils/scope.js: any grant narrows, none does
+  // not.
+  if (organizationId && (await hasResourceGrants(user.id, organizationId))) {
+    const { campaignIds, routeIds } = await getGrantedLeadScope(
       user.id,
       organizationId,
     );
@@ -128,14 +131,6 @@ const getLeads = async (req, res) => {
       queryOrganizationId != null &&
       String(queryOrganizationId).trim() !== ""
     ) {
-      if (ctx.isWebmaster) {
-        if (
-          !ctx.organizationId ||
-          String(queryOrganizationId) !== ctx.organizationId
-        ) {
-          return res.status(403).json({ error: "Forbidden" });
-        }
-      }
       if (
         !ctx.organizationId ||
         String(queryOrganizationId) !== ctx.organizationId
@@ -151,42 +146,16 @@ const getLeads = async (req, res) => {
     );
     const skip = (pageNumber - 1) * take;
 
-    let scopeWhere = {};
-    if (ctx.isWebmaster) {
-      if (!ctx.organizationId) {
-        return res.status(403).json({
-          error: "Forbidden",
-          message: "No organization context",
-        });
-      }
-      const { campaignIds: ids, routeIds } = await getLeadScopeForWebmaster(
-        ctx.userId,
-        ctx.organizationId,
-      );
-      if (!ids.length && !routeIds.length) {
-        return res.json({
-          leads: [],
-          total: 0,
-          page: pageNumber,
-          limit: take,
-        });
-      }
-      scopeWhere = {
-        organizationId: ctx.organizationId,
-        OR: [
-          ...(ids.length ? [{ campaignId: { in: ids } }] : []),
-          ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
-        ],
-      };
-    } else {
-      if (!ctx.organizationId) {
-        return res.status(403).json({
-          error: "Forbidden",
-          message: "No organization context",
-        });
-      }
-      scopeWhere = { organizationId: ctx.organizationId };
+    // The shared resolver decides which leads this member may see; a member with
+    // explicit grants is narrowed to them, everyone else to their organization.
+    const scope = await resolveLeadScope(req);
+    if (!scope.ok) {
+      return res.status(scope.status).json({ error: scope.error });
     }
+    if (scope.empty) {
+      return res.json({ leads: [], total: 0, page: pageNumber, limit: take });
+    }
+    const scopeWhere = scope.where;
 
     const where = {
       ...scopeWhere,
@@ -298,9 +267,7 @@ const addLead = async (req, res) => {
       where: { apiKey },
       select: {
         id: true,
-        webmasterProfile: {
-          select: { isActive: true },
-        },
+        isActive: true,
         organizationMemberships: {
               select: {
             organizationId: true,
@@ -324,7 +291,7 @@ const addLead = async (req, res) => {
             },
           },
         },
-        webmasterCampaignMemberships: {
+        campaignGrants: {
           where: {
             campaign: { campId },
           },
@@ -361,7 +328,7 @@ const addLead = async (req, res) => {
 
     const campaign =
       userWithCampaign.ownedCampaigns[0] ||
-      userWithCampaign.webmasterCampaignMemberships[0]?.campaign;
+      userWithCampaign.campaignGrants[0]?.campaign;
     if (!campaign) {
       logLeadOutcome(req, {
         ...logFields,
@@ -375,17 +342,24 @@ const addLead = async (req, res) => {
     logFields.routeId = campaign.routeId;
     logFields.organizationId = campaign.organizationId;
 
-    if (userWithCampaign.webmasterProfile) {
-      if (!userWithCampaign.webmasterProfile.isActive) {
-        logLeadOutcome(req, {
-          ...logFields,
-          outcome: "webmaster_inactive",
-          status: 403,
-          actorUserId: userWithCampaign.id,
-        });
-        return res.status(403).json({ error: "Webmaster account is inactive" });
-      }
-      if (!userWithCampaign.webmasterCampaignMemberships[0]) {
+    if (!userWithCampaign.isActive) {
+      logLeadOutcome(req, {
+        ...logFields,
+        outcome: "member_inactive",
+        status: 403,
+        actorUserId: userWithCampaign.id,
+      });
+      return res.status(403).json({ error: "Account is inactive" });
+    }
+
+    // A member with campaign grants must have one for this campaign. A member
+    // with none is checked against the organization instead, below.
+    const hasGrants = await hasResourceGrants(
+      userWithCampaign.id,
+      campaign.organizationId,
+    );
+    if (hasGrants) {
+      if (!userWithCampaign.campaignGrants[0]) {
         logLeadOutcome(req, {
           ...logFields,
           outcome: "campaign_access_denied",
@@ -859,35 +833,16 @@ const getMonthlyLeadsByUser = async (req, res) => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(now.getDate() - 30);
 
-    if (ctx?.isWebmaster) {
-      const { campaignIds, routeIds } = await getLeadScopeForWebmaster(
-        userId,
-        ctx.organizationId,
-      );
-      if (!campaignIds.length && !routeIds.length) return res.json([]);
-
-      where = {
-        organizationId: ctx.organizationId,
-        OR: [
-          ...(campaignIds.length ? [{ campaignId: { in: campaignIds } }] : []),
-          ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
-        ],
-        createdAt: {
-          gte: thirtyDaysAgo,
-          lte: now,
-        },
-      };
-    } else if (ctx?.organizationId) {
-      where = {
-        organizationId: ctx.organizationId,
-        createdAt: {
-          gte: thirtyDaysAgo,
-          lte: now,
-        },
-      };
-    } else {
-      return res.status(403).json({ error: "Unauthorized" });
+    const scope = await resolveLeadScope(req);
+    if (!scope.ok) {
+      return res.status(scope.status).json({ error: scope.error });
     }
+    if (scope.empty) return res.json([]);
+
+    where = {
+      ...scope.where,
+      createdAt: { gte: thirtyDaysAgo, lte: now },
+    };
 
     const leads = await prismaClient.lead.findMany({
       where,
@@ -949,35 +904,16 @@ const getPastTenDaysLeadsByUser = async (req, res) => {
     tenDaysAgo.setDate(now.getDate() - 10);
     const nowTime = new Date();
 
-    if (ctx?.isWebmaster) {
-      const { campaignIds, routeIds } = await getLeadScopeForWebmaster(
-        userId,
-        ctx.organizationId,
-      );
-      if (!campaignIds.length && !routeIds.length) return res.json([]);
-
-      where = {
-        organizationId: ctx.organizationId,
-        OR: [
-          ...(campaignIds.length ? [{ campaignId: { in: campaignIds } }] : []),
-          ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
-        ],
-        createdAt: {
-          gte: tenDaysAgo,
-          lte: nowTime,
-        },
-      };
-    } else if (ctx?.organizationId) {
-      where = {
-        organizationId: ctx.organizationId,
-        createdAt: {
-          gte: tenDaysAgo,
-          lte: nowTime,
-        },
-      };
-    } else {
-      return res.status(403).json({ error: "Unauthorized" });
+    const scope = await resolveLeadScope(req);
+    if (!scope.ok) {
+      return res.status(scope.status).json({ error: scope.error });
     }
+    if (scope.empty) return res.json([]);
+
+    where = {
+      ...scope.where,
+      createdAt: { gte: tenDaysAgo, lte: nowTime },
+    };
 
     const exportLimit = Math.min(
       Math.max(Number(req.query.limit) || 500, 1),

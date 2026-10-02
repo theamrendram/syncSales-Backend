@@ -1,5 +1,6 @@
 import prismaClient from "../utils/prismaClient.js";
 import { generateKey } from "../utils/generate-key.js";
+import { DEFAULT_ROLE } from "../lib/org-roles.js";
 
 const userSelect = {
   id: true,
@@ -102,7 +103,7 @@ const getUser = async (req, res) => {
       },
       select: {
         ...userSelect,
-        webmasterProfile: { select: { userId: true } },
+        organizationMemberships: { select: { role: true }, take: 1 },
       },
     });
 
@@ -110,16 +111,20 @@ const getUser = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    const { webmasterProfile, ...userData } = user;
+    const { organizationMemberships, ...userData } = user;
 
-    // Same discriminator as resolveIsWebmaster() in
-    // authentication-context.middleware.js: a WebmasterProfile is what makes a
-    // user a webmaster. Everyone else is an admin — self-serve signups have no
-    // organization or membership until they create one, so any check based on
-    // those would misclassify them.
-    return res.status(200).json({
-      data: { ...userData, role: webmasterProfile ? "webmaster" : "admin" },
-    });
+    // The membership's own role, rather than the old admin|webmaster pair derived
+    // from a WebmasterProfile. One organization per user, so the single
+    // membership is the answer.
+    //
+    // Falls back to the least-privileged role, not the most: a self-serve signup
+    // has no membership until they create an organization, and defaulting that to
+    // "admin" — as this did — hands the UI a privilege the API would refuse.
+    // Optional chaining on the array too: a caller that selected the user without
+    // this relation must not turn into a 500 out of a role lookup.
+    const role = organizationMemberships?.[0]?.role ?? DEFAULT_ROLE;
+
+    return res.status(200).json({ data: { ...userData, role } });
   } catch (error) {
     console.error("Error in getUser:", error);
     return res

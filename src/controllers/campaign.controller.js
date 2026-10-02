@@ -1,5 +1,5 @@
 import prismaClient from "../utils/prismaClient.js";
-import { getCampaignIdsForWebmaster } from "../utils/webmaster-campaigns.js";
+import { requireScope } from "../middlewares/scope.middleware.js";
 
 const CAMPAIGN_MUTABLE_FIELDS = [
   "name",
@@ -56,26 +56,21 @@ const campaignSelect = {
 const getCampaigns = async (req, res) => {
   try {
     const take = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
-    const ctx = req.authContext;
+    const scope = requireScope(req);
+
+    // Entitled to nothing, which is an answer rather than a query.
+    if (scope.empty) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+        meta: { limit: take },
+      });
+    }
+
     const where = {
-      organizationId: req.organizationId,
+      ...scope.where,
       isArchived: false,
     };
-
-    if (ctx?.isWebmaster) {
-      const ids = await getCampaignIdsForWebmaster(
-        ctx.userId,
-        ctx.organizationId,
-      );
-      if (!ids.length) {
-        return res.status(200).json({
-          success: true,
-          data: [],
-          meta: { limit: take },
-        });
-      }
-      where.id = { in: ids };
-    }
 
     // Compatibility shape: allow ?userId=... but do not trust it for authorization.
     // If userId filter is requested, filter by the authenticated user only.
@@ -107,27 +102,19 @@ const getCampaigns = async (req, res) => {
 const getCampaignById = async (req, res) => {
   const { id } = req.params;
   try {
-    const ctx = req.authContext;
-    if (ctx?.isWebmaster) {
-      const allowed = await getCampaignIdsForWebmaster(
-        ctx.userId,
-        ctx.organizationId,
-      );
-      if (!allowed.includes(id)) {
-        return res
-          .status(404)
-          .json({ success: false, error: "Campaign not found" });
-      }
-    }
+    const scope = requireScope(req);
 
-    const campaign = await prismaClient.campaign.findFirst({
-      where: {
-        id,
-        organizationId: req.organizationId,
-        isArchived: false,
-      },
-      select: campaignSelect,
-    });
+    // One query asks both questions: does it exist, and is it in scope. A row
+    // outside the scope is absent rather than forbidden — saying "forbidden"
+    // would confirm the id is real.
+    const campaign = scope.empty
+      ? null
+      : await prismaClient.campaign.findFirst({
+          // AND rather than a spread: a webmaster's scope constrains `id`
+          // itself, and merging would let it overwrite the id being requested.
+          where: { AND: [{ id }, scope.where, { isArchived: false }] },
+          select: campaignSelect,
+        });
 
     if (!campaign) {
       return res

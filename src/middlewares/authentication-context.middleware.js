@@ -1,11 +1,7 @@
 import { validate as uuidValidate } from "uuid";
 import prisma from "../utils/prismaClient.js";
 import logger from "../utils/logger.js";
-import {
-  PERMISSIONS,
-  isReadPermission,
-  toPermissionList,
-} from "../lib/org-roles.js";
+import { PERMISSIONS, toPermissionList } from "../lib/org-roles.js";
 
 /** An owner is never locked out by missing or malformed role data. */
 const OWNER_FALLBACK_PERMISSIONS = [...PERMISSIONS];
@@ -93,12 +89,6 @@ async function buildAuthContextForOrg(userId, organizationId) {
 
   const membership = await prisma.organizationMember.findFirst({
     where: { userId, organizationId },
-    include: {
-      // Loaded here rather than in a query of its own: this is the only place
-      // that needs it, and it used to cost a separate User lookup on every
-      // authenticated request.
-      user: { select: { webmasterProfile: { select: { userId: true } } } },
-    },
   });
 
   if (!isOwner && !membership) {
@@ -147,11 +137,6 @@ async function buildAuthContextForOrg(userId, organizationId) {
       role,
       permissions,
       isOrganizationOwner: isOwner,
-      // A scoping flag, not a permission one. Permissions come from the role
-      // above; this narrows *which rows* the caller sees, via the campaigns and
-      // routes linked to them. That is why it is not a role: no permission string
-      // can express "only the campaigns assigned to you".
-      isWebmaster: Boolean(membership?.user?.webmasterProfile),
     },
   };
 }
@@ -208,8 +193,7 @@ function authenticationContext(options = {}) {
           role: null,
           permissions: null,
           isOrganizationOwner: false,
-          isWebmaster: false,
-        });
+            });
         return next();
       }
 
@@ -245,8 +229,7 @@ function authenticationContext(options = {}) {
               role: null,
               permissions: null,
               isOrganizationOwner: false,
-              isWebmaster: false,
-            });
+                    });
             return next();
           }
           return res.status(result.status).json({
@@ -276,8 +259,7 @@ function authenticationContext(options = {}) {
         role: null,
         permissions: null,
         isOrganizationOwner: false,
-        isWebmaster: false,
-      });
+        });
       return next();
     } catch (err) {
       console.error("authenticationContext", err);
@@ -297,20 +279,6 @@ function requireOrgPermission(permission) {
     const ctx = req.authContext;
     if (!ctx?.userId) {
       return res.status(401).json({ success: false, error: "Unauthorized" });
-    }
-
-    // A resource-scoped role with no organization resolved may still read, and
-    // only read: their rows are narrowed by AccessControl rather than by the
-    // organization, so the absence of one is not by itself a reason to refuse.
-    if (ctx.isWebmaster && !ctx.organizationId) {
-      if (isReadPermission(permission) && ctx.can(permission)) {
-        return next();
-      }
-      return res.status(403).json({
-        success: false,
-        error: "Forbidden",
-        message: "Insufficient permissions for this resource.",
-      });
     }
 
     if (!ctx.organizationId) {

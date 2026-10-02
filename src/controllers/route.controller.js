@@ -1,6 +1,6 @@
 import prismaClient from "../utils/prismaClient.js";
 import logger from "../utils/logger.js";
-import { getRouteIdsForWebmaster } from "../utils/webmaster-campaigns.js";
+import { requireScope } from "../middlewares/scope.middleware.js";
 
 const ROUTE_REQUIRED_FIELDS = ["name", "product", "description", "payout"];
 
@@ -27,26 +27,22 @@ const getMissingRequiredFields = (body) =>
 const getRoutes = async (req, res) => {
   try {
     const take = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
-    const ctx = req.authContext;
+    const scope = requireScope(req);
+
+    if (scope.empty) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+        meta: { limit: take },
+      });
+    }
+
     const where = {
-      organizationId: req.organizationId,
+      ...scope.where,
+      // Soft deletion is a business filter, not an authorization one, so it is
+      // added here rather than folded into the scope.
       deletedAt: null,
     };
-
-    if (ctx?.isWebmaster) {
-      const routeIds = await getRouteIdsForWebmaster(
-        ctx.userId,
-        ctx.organizationId,
-      );
-      if (!routeIds.length) {
-        return res.status(200).json({
-          success: true,
-          data: [],
-          meta: { limit: take },
-        });
-      }
-      where.id = { in: routeIds };
-    }
 
     // Keep support for ?userId=... query shape while deriving filter from auth.
     if (req.query.userId !== undefined) {
@@ -77,7 +73,6 @@ const getRoutes = async (req, res) => {
       take,
     });
 
-    console.log("[getRoutes] routes: ", routes)
     return res.status(200).json({
       success: true,
       data: routes,
@@ -126,26 +121,18 @@ const addRoute = async (req, res) => {
 
 const getRouteById = async (req, res) => {
   const { id } = req.params;
-  console.log("[getRouteById] id: ", id)
   try {
-    const ctx = req.authContext;
-    if (ctx?.isWebmaster) {
-      const allowed = await getRouteIdsForWebmaster(
-        ctx.userId,
-        ctx.organizationId,
-      );
-      if (!allowed.includes(id)) {
-        return res.status(404).json({ success: false, error: "Route not found" });
-      }
-    }
+    const scope = requireScope(req);
 
-    const route = await prismaClient.route.findFirst({
-      where: {
-        id,
-        organizationId: req.organizationId,
-        deletedAt: null,
-      },
-    });
+    // Out of scope and non-existent give the same answer: a 404 that does not
+    // confirm the id is real.
+    const route = scope.empty
+      ? null
+      : await prismaClient.route.findFirst({
+          // AND rather than a spread: a webmaster's scope constrains `id`
+          // itself, and merging would let it overwrite the id being requested.
+          where: { AND: [{ id }, scope.where, { deletedAt: null }] },
+        });
     if (!route) {
       return res.status(404).json({ success: false, error: "Route not found" });
     }

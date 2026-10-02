@@ -27,6 +27,13 @@ model User {
   image                   String?
   apiKey                  String               @unique @default("0")
 
+  // Moved off WebmasterProfile, which is gone. These are member attributes, not
+  // a separate kind of account: isActive disables a member's API key without
+  // deleting them, and leadLimit/payout are per-member commercial terms.
+  isActive                Boolean              @default(true)
+  leadLimit               Int?
+  payout                  Float?
+
   // Better Auth admin plugin. Platform-level, and deliberately distinct from
   // the organization roles in src/lib/org-roles.js: this one decides who may
   // impersonate, not what anyone can do inside an organization. Admin rights
@@ -49,25 +56,12 @@ model User {
   routes                  Route[]
   subscription            Subscription[]
   userPlan                UserPlan?            @relation("UserToUserPlan")
-  webmasterProfile             WebmasterProfile?
-  webmasterCampaignMemberships CampaignWebmaster[] @relation("CampaignWebmasterMembership")
+  campaignGrants               CampaignWebmaster[] @relation("CampaignWebmasterMembership")
   resourceAccess               AccessControl[]
 
   sessions                Session[]
   accounts                Account[]
   sentInvitations         Invitation[]         @relation("InvitationInviter")
-}
-
-model WebmasterProfile {
-  userId    String   @id
-  isActive  Boolean  @default(true)
-  leadLimit Int?
-  payout    Float?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([isActive])
 }
 
 model Organization {

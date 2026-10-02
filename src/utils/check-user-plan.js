@@ -48,18 +48,20 @@ const checkUserPlan = async (req, res, next) => {
       });
     }
 
-    if (principal.type === "webmaster" && !principal.isActive) {
+    // Applies to any member now, not only webmasters: an inactive account's key
+    // must not post leads whatever its role.
+    if (!principal.isActive) {
       logLeadOutcome(req, {
         ...logFields,
-        outcome: "webmaster_inactive",
+        outcome: "member_inactive",
         status: 403,
         actorUserId: principal.actorUserId,
       });
       return res.status(403).json({ error: "Webmaster is inactive" });
     }
 
-    // Usually already loaded alongside the API key lookup; only a webmaster
-    // whose plan owner is a different user still needs a round trip here.
+    // Usually already loaded alongside the API key lookup; only a member whose
+    // plan owner is a different user still needs a round trip here.
     let user = principal.planUser;
     if (!principal.planUserResolved) {
       timer?.time("db:user.findUnique(plan)");

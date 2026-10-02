@@ -17,11 +17,8 @@ const resolveApiKeyPrincipal = async (apiKey, timer) => {
     select: {
       id: true,
       organizationId: true,
-      webmasterProfile: {
-        select: {
-          isActive: true,
-        },
-      },
+      // Moved off WebmasterProfile. Disables a member's key without deleting them.
+      isActive: true,
       userPlan: {
         select: {
           dailyLeadsLimit: true,
@@ -36,49 +33,40 @@ const resolveApiKeyPrincipal = async (apiKey, timer) => {
   }
 
   // The plan owner is usually the key owner, so its plan rides along with this
-  // query. When it is not (webmaster under an org owner), planUserResolved is
-  // false and the caller must fetch the plan owner itself.
+  // query. When it is not — a member posting against their organization's plan —
+  // planUserResolved is false and the caller fetches the plan owner itself.
   const selfPlanUser = {
     id: user.id,
     organizationId: user.organizationId || null,
     userPlan: user.userPlan || null,
   };
 
-  if (user.webmasterProfile) {
-    let planUserId = user.id;
-    if (user.organizationId) {
-      timer?.time("db:organization.findUnique(owner)");
-      const org = await prismaClient.organization.findUnique({
-        where: { id: user.organizationId },
-        select: { ownerId: true },
-      });
-      timer?.timeEnd("db:organization.findUnique(owner)");
-      if (org?.ownerId) {
-        planUserId = org.ownerId;
-      }
+  // Lead quota belongs to the organization, and the organization's plan hangs off
+  // its owner. A member who is not the owner therefore bills against the owner's
+  // plan — which used to be a rule about webmasters specifically, and is now
+  // simply what being a member means.
+  let planUserId = user.id;
+  if (user.organizationId) {
+    timer?.time("db:organization.findUnique(owner)");
+    const org = await prismaClient.organization.findUnique({
+      where: { id: user.organizationId },
+      select: { ownerId: true },
+    });
+    timer?.timeEnd("db:organization.findUnique(owner)");
+    if (org?.ownerId) {
+      planUserId = org.ownerId;
     }
-
-    return {
-      type: "webmaster",
-      apiKey: normalizedApiKey,
-      actorUserId: user.id,
-      planUserId,
-      planUserResolved: planUserId === user.id,
-      planUser: planUserId === user.id ? selfPlanUser : null,
-      organizationId: user.organizationId || null,
-      isActive: user.webmasterProfile.isActive,
-    };
   }
 
   return {
     type: "user",
     apiKey: normalizedApiKey,
     actorUserId: user.id,
-    planUserId: user.id,
-    planUserResolved: true,
-    planUser: selfPlanUser,
+    planUserId,
+    planUserResolved: planUserId === user.id,
+    planUser: planUserId === user.id ? selfPlanUser : null,
     organizationId: user.organizationId || null,
-    isActive: true,
+    isActive: user.isActive,
   };
 };
 

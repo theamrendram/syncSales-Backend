@@ -5,6 +5,7 @@ import { checkDuplicateLead } from "../utils/check-duplicate-lead.js";
 import getClientIp from "../utils/get-client-ip.js";
 import { encodePublicOrgLeadId } from "../utils/org-lead-id.js";
 import { resolveApiKeyPrincipal } from "../utils/api-key-principal.js";
+import { hasResourceGrants } from "../utils/resource-grants.js";
 import logger from "../utils/logger.js";
 import { logLeadOutcome, fingerprintApiKey, phoneLast4 } from "../utils/lead-log.js";
 
@@ -258,7 +259,15 @@ const getPrincipalWithCampaign = async (
     return null;
   }
 
-  if (principal.type === "user") {
+  // A member with explicit campaign grants resolves the campaign through those
+  // grants; a member without resolves it through the campaigns they own. This
+  // used to be "webmaster or not", which was the same distinction wearing a
+  // different name.
+  const narrowed = principal.organizationId
+    ? await hasResourceGrants(principal.actorUserId, principal.organizationId)
+    : false;
+
+  if (!narrowed) {
     timer?.time("db:user.findUnique(+ownedCampaigns)");
     const userWithCampaign = await prismaClient.user.findUnique({
       relationLoadStrategy: "join",
@@ -295,7 +304,7 @@ const getPrincipalWithCampaign = async (
       ...principal,
       id: userWithCampaign.id,
       usageUserId: principal.planUserId,
-      campaigns: userWithCampaign.ownedCampaigns,
+      campaigns: userWithCampaign.ownedCampaigns ?? [],
     };
   }
 
@@ -305,7 +314,7 @@ const getPrincipalWithCampaign = async (
     where: {
       campId,
       organizationId: principal.organizationId || undefined,
-      webmasterMemberships: {
+      campaignGrants: {
         some: { userId: principal.actorUserId },
       },
     },
@@ -459,31 +468,29 @@ const processLeadRequest = async (req, res, source) => {
 
     logFields.principalType = principalWithCampaign.type;
 
-    if (principalWithCampaign.type === "webmaster") {
-      if (!principalWithCampaign.isActive) {
+    if (!principalWithCampaign.isActive) {
         logLeadOutcome(req, {
           ...logFields,
-          outcome: "webmaster_inactive",
+          outcome: "member_inactive",
           status: 403,
           actorUserId: principalWithCampaign.actorUserId,
         });
-        return res.status(403).json({ error: "Webmaster is inactive" });
-      }
-
-      if (!principalWithCampaign.organizationId) {
-        logLeadOutcome(req, {
-          ...logFields,
-          outcome: "webmaster_no_org",
-          status: 400,
-          actorUserId: principalWithCampaign.actorUserId,
-        });
-        return res.status(400).json({
-          error: "Webmaster API key must belong to an organization",
-        });
-      }
+      return res.status(403).json({ error: "Account is inactive" });
     }
 
-    const campaign = principalWithCampaign.campaigns[0];
+    if (!principalWithCampaign.organizationId) {
+      logLeadOutcome(req, {
+        ...logFields,
+        outcome: "member_no_org",
+        status: 400,
+        actorUserId: principalWithCampaign.actorUserId,
+      });
+      return res.status(400).json({
+        error: "API key must belong to an organization",
+      });
+    }
+
+    const campaign = principalWithCampaign.campaigns?.[0];
     if (!campaign) {
       logLeadOutcome(req, {
         ...logFields,
@@ -515,19 +522,16 @@ const processLeadRequest = async (req, res, source) => {
       });
     }
 
-    if (
-      principalWithCampaign.type === "webmaster" &&
-      principalWithCampaign.organizationId !== organizationId
-    ) {
+    if (principalWithCampaign.organizationId !== organizationId) {
       logLeadOutcome(req, {
         ...logFields,
-        outcome: "webmaster_org_mismatch",
+        outcome: "member_org_mismatch",
         status: 403,
         keyOrgId: principalWithCampaign.organizationId,
         campaignOrgId: organizationId,
       });
       return res.status(403).json({
-        error: "Webmaster organization does not match campaign organization",
+        error: "API key organization does not match campaign organization",
       });
     }
 

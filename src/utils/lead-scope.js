@@ -1,62 +1,26 @@
-import { getLeadScopeForWebmaster } from "./webmaster-campaigns.js";
+/**
+ * Lead scope, kept as its own entry point for the chart, health and sub-ID
+ * endpoints that already call it.
+ *
+ * The logic now lives in src/utils/scope.js alongside the campaign and route
+ * scopes, so the three cannot drift apart. This is the same contract it always
+ * had; what changed is that it is one implementation rather than one of several.
+ */
+import { resolveScope } from "./scope.js";
 
 /**
- * The set of leads a caller is allowed to see, as a reusable Prisma `where`
- * fragment carrying no date filter of its own.
- *
- * Extracted so the chart, health and sub-ID endpoints cannot drift apart on who
- * sees what. A webmaster is scoped to their assigned campaigns and routes; a
- * regular member to their organization. Every endpoint spreads this and adds
- * its own `createdAt`.
- *
  * Returns one of:
  *   { ok: false, status, error }  — forward verbatim
- *   { ok: true, empty: true }     — a webmaster assigned nothing; no query
- *                                   should run, and every aggregate is empty
+ *   { ok: true, empty: true }     — entitled to no leads; run no query, and
+ *                                   every aggregate is empty
  *   { ok: true, empty: false, where, organizationId }
  */
 const resolveLeadScope = async (req) => {
-  const { userId } = req.auth ?? {};
-  const ctx = req.authContext;
-
-  if (!userId) {
-    return { ok: false, status: 400, error: "User ID not found" };
-  }
-
-  if (ctx?.isWebmaster) {
-    const { campaignIds, routeIds } = await getLeadScopeForWebmaster(
-      userId,
-      ctx.organizationId,
-    );
-
-    if (!campaignIds.length && !routeIds.length) {
-      return { ok: true, empty: true, organizationId: ctx.organizationId };
-    }
-
-    return {
-      ok: true,
-      empty: false,
-      organizationId: ctx.organizationId,
-      where: {
-        organizationId: ctx.organizationId,
-        OR: [
-          ...(campaignIds.length ? [{ campaignId: { in: campaignIds } }] : []),
-          ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
-        ],
-      },
-    };
-  }
-
-  if (ctx?.organizationId) {
-    return {
-      ok: true,
-      empty: false,
-      organizationId: ctx.organizationId,
-      where: { organizationId: ctx.organizationId },
-    };
-  }
-
-  return { ok: false, status: 403, error: "Unauthorized" };
+  // withScope("lead") may already have resolved this in the middleware chain.
+  // Reusing it avoids running the webmaster lookups a second time on routes that
+  // mount both.
+  if (req.scope) return req.scope;
+  return resolveScope(req, "lead");
 };
 
 export { resolveLeadScope };

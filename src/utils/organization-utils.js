@@ -99,12 +99,12 @@ const checkDataAccess = async (userId, dataId, dataType, organizationId) => {
           },
         });
         break;
-      case "webmaster":
+      case "webmaster": // legacy filter name; means "has campaign grants"
         data = await prisma.user.findFirst({
           where: {
             id: dataId,
             organizationId,
-            webmasterProfile: { isNot: null },
+            campaignGrants: { some: {} },
           },
         });
         break;
@@ -150,7 +150,7 @@ const getOrganizationStats = async (organizationId) => {
       prisma.campaign.count({ where: { organizationId } }),
       prisma.route.count({ where: { organizationId } }),
       prisma.user.count({
-        where: { organizationId, webmasterProfile: { isNot: null } },
+        where: { organizationId, campaignGrants: { some: {} } },
       }),
       prisma.organizationMember.count({
         where: {

@@ -23,7 +23,9 @@ const getWebhooks = async (req, res) => {
   if (!ownerOrganization?.id) {
     return res.status(400).json({ error: "Owner organization not found" });
   } 
-  const webmasters = await prismaClient.user.findMany({
+  // Was "the organization's webmasters, with their profiles". There is no profile
+  // table now, and the attributes it held sit on User.
+  const members = await prismaClient.user.findMany({
     where: {
       organizationMemberships: {
         some: {
@@ -31,11 +33,17 @@ const getWebhooks = async (req, res) => {
         },
       },
     },
-    include: {
-      WebmasterProfile: true,
+    select: {
+      id: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+      isActive: true,
+      leadLimit: true,
+      payout: true,
     },
   });
-  res.json(webmasters);
+  res.json(members);
 };
 
 export { addWebhook, getWebhooks };

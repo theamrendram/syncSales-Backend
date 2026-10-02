@@ -44,8 +44,8 @@ import routeRoute from "./routes/route.route.js";
 import subscriptionRoute from "./routes/subscription.route.js";
 import userRoute from "./routes/user.route.js";
 import webhookRoute from "./routes/webhook.route.js";
-import webmasterRoute from "./routes/webmaster.route.js";
 import { authenticationContext } from "./middlewares/authentication-context.middleware.js";
+import { withScope } from "./middlewares/scope.middleware.js";
 
 const organizationContextStrict = authenticationContext();
 const organizationContextOptional = authenticationContext({
@@ -139,6 +139,7 @@ app.use(
   "/api/v1/routes",
   requireAuth(),
   organizationContextStrict,
+  withScope("route"),
   routeRoute,
 );
 app.use("/api/v1/webhook", requireAuth(), webhookRoute);
@@ -146,14 +147,24 @@ app.use(
   "/api/v1/campaigns",
   requireAuth(),
   organizationContextStrict,
+  withScope("campaign"),
   campaignRoute,
 );
-app.use("/api/v1/webmaster", requireAuth(), webmasterRoute);
-app.use("/api/v1/lead", requireAuth(), organizationContextOptional, leadsRoute);
+// organizationContextOptional here, so a request that resolves no organization
+// reaches the controller. withScope refuses it rather than scoping to nothing,
+// which is why the lead routes that genuinely allow no organization resolve their
+// own scope instead of mounting this.
+app.use(
+  "/api/v1/lead",
+  requireAuth(),
+  organizationContextOptional,
+  leadsRoute,
+);
 app.use(
   "/api/v1/chart",
   requireAuth(),
   organizationContextStrict,
+  withScope("lead"),
   chartRoute,
 );
 // Organization and role routes
