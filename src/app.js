@@ -41,7 +41,6 @@ import organizationRoute from "./routes/organization.route.js";
 import postbackRoute from "./routes/postback.route.js";
 import roleRoute from "./routes/role.route.js";
 import routeRoute from "./routes/route.route.js";
-import sellerRoute from "./routes/seller.route.js";
 import subscriptionRoute from "./routes/subscription.route.js";
 import userRoute from "./routes/user.route.js";
 import webhookRoute from "./routes/webhook.route.js";
@@ -143,7 +142,6 @@ app.use(
   routeRoute,
 );
 app.use("/api/v1/webhook", requireAuth(), webhookRoute);
-app.use("/api/v1/seller", requireAuth(), sellerRoute);
 app.use(
   "/api/v1/campaigns",
   requireAuth(),
