@@ -92,12 +92,6 @@ const updateMemberRole = async (req, res) => {
       });
     }
 
-    if (!req.authContext.can("member:manage")) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You do not have permission to manage members.",
-      });
-    }
 
     const member = await prisma.organizationMember.findFirst({
       where: {

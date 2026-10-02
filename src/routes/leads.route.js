@@ -3,14 +3,15 @@ import { getChartData } from "../controllers/chart.controller.js";
 import { LeadsDownloadLimiter } from "../middlewares/rate-limiter.middleware.js";
 import { requestTiming } from "../utils/request-timer.js";
 
+import { requireOrgPermission } from "../middlewares/authentication-context.middleware.js";
 import express from "express";
 const router = express.Router();
 
-router.get("/", getLeads);
-router.post("/", requestTiming("POST /lead"), addLead);
-router.get("/user", getLeadsByUser);
-router.get("/user/pagination", getLeadsByUserPagination);
-router.get("/download", LeadsDownloadLimiter, downloadLeadsCsv);
-router.get("/chart", getChartData);
+router.get("/", requireOrgPermission("lead:read"), getLeads);
+router.post("/", requireOrgPermission("lead:write"), requestTiming("POST /lead"), addLead);
+router.get("/user", requireOrgPermission("lead:read"), getLeadsByUser);
+router.get("/user/pagination", requireOrgPermission("lead:read"), getLeadsByUserPagination);
+router.get("/download", requireOrgPermission("lead:read"), LeadsDownloadLimiter, downloadLeadsCsv);
+router.get("/chart", requireOrgPermission("lead:read"), getChartData);
 
 export default router;

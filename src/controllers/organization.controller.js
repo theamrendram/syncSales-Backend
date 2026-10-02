@@ -164,13 +164,6 @@ const updateOrganization = async (req, res) => {
       });
     }
 
-    if (!req.authContext.can("organization:manage")) {
-      return res.status(403).json({
-        success: false,
-        message:
-          "Access denied. You do not have permission to manage this organization.",
-      });
-    }
 
     const organization = await prisma.organization.update({
       where: { id: organizationId },
@@ -223,12 +216,6 @@ const addMember = async (req, res) => {
       });
     }
 
-    if (!req.authContext.can("member:manage")) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You do not have permission to manage members.",
-      });
-    }
 
     // Find user by email
     const user = await prisma.user.findUnique({
@@ -323,12 +310,6 @@ const removeMember = async (req, res) => {
       });
     }
 
-    if (!req.authContext.can("member:manage")) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You do not have permission to manage members.",
-      });
-    }
 
     const member = await prisma.organizationMember.findFirst({
       where: { id: memberId, organizationId },

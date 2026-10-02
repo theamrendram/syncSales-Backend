@@ -1,3 +1,4 @@
+import { requireOrgPermission } from "../middlewares/authentication-context.middleware.js";
 import express from "express";
 import multer from "multer";
 import path from "path";
@@ -31,11 +32,11 @@ const upload = multer({
 router.post("/", createOrganization);
 router.get("/user", getUserOrganizations);
 router.get("/:organizationId", getOrganization);
-router.put("/:organizationId", updateOrganization);
+router.put("/:organizationId", requireOrgPermission("organization:manage"), updateOrganization);
 
 // Member management
 router.get("/:organizationId/members", getMembers);
-router.post("/:organizationId/members", addMember);
-router.delete("/:organizationId/members/:memberId", removeMember);
+router.post("/:organizationId/members", requireOrgPermission("member:manage"), addMember);
+router.delete("/:organizationId/members/:memberId", requireOrgPermission("member:manage"), removeMember);
 
 export default router;
