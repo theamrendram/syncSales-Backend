@@ -1,0 +1,64 @@
+# Nightly encrypted pg_dump of the production database.
+#
+# Supabase Free has no automatic backups. This keeps 90 days of nightly dumps
+# as GitHub Actions artifacts at no cost (the database is a few MB).
+#
+# Secrets (repo → Settings → Secrets and variables → Actions):
+#   PROD_DATABASE_URL   Supabase *session pooler* URL (port 5432). GitHub
+#                       runners are IPv4-only and the direct host is IPv6-only.
+#   BACKUP_PASSPHRASE   long random string; needed to decrypt. Keep a copy in
+#                       your password manager — without it the dumps are useless.
+#
+# Restore:
+#   gpg --batch --decrypt --passphrase "$BACKUP_PASSPHRASE" syncsales-<date>.dump.gpg > db.dump
+#   pg_restore -d "$DATABASE_URL" -n public --no-owner --no-privileges --clean --if-exists db.dump
+
+name: Database backup
+
+on:
+  schedule:
+    - cron: "30 20 * * *" # 02:00 IST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Supabase runs Postgres 17; pg_dump must be at least the server version.
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+
+      - name: Dump
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+        run: |
+          STAMP=$(date -u +%Y-%m-%dT%H%MZ)
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          pg_dump "$DATABASE_URL" -Fc --no-owner --no-privileges -n public -f "syncsales-$STAMP.dump"
+          ls -l "syncsales-$STAMP.dump"
+          # A dump that is unexpectedly tiny means the URL points at an empty database.
+          test "$(stat -c %s "syncsales-$STAMP.dump")" -gt 20000
+
+      - name: Encrypt
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          gpg --batch --yes --symmetric --cipher-algo AES256 \
+            --passphrase "$BACKUP_PASSPHRASE" \
+            -o "syncsales-$STAMP.dump.gpg" "syncsales-$STAMP.dump"
+          shred -u "syncsales-$STAMP.dump"
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ env.STAMP }}
+          path: syncsales-${{ env.STAMP }}.dump.gpg
+          retention-days: 90
+          if-no-files-found: error
