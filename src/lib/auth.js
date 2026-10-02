@@ -217,7 +217,12 @@ export const auth = betterAuth({
         // a name: the plugin expects one, and cannot be pointed at a uuid foreign
         // key. `createdAt` is this table's `joinedAt`.
         member: {
-          modelName: "OrganizationMember",
+          // The Prisma *client property*, not the model name. The adapter
+          // introspects the generated client and lowercases each model's first
+          // letter, so "OrganizationMember" never matches "organizationMember" —
+          // it reports the table as missing and getSession() then throws
+          // SCHEMA_MISMATCH, which 401s every authenticated request.
+          modelName: "organizationMember",
           fields: { createdAt: "joinedAt" },
         },
         organization: {
