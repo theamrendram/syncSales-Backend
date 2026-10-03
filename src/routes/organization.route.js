@@ -4,7 +4,7 @@ import multer from "multer";
 import path from "path";
 const router = express.Router();
 
-import { createOrganization, getUserOrganizations, getOrganization, updateOrganization, getMembers, addMember, removeMember } from "../controllers/organization.controller.js";
+import { createOrganization, getUserOrganizations, getOrganization, updateOrganization, getMembers, addMember, removeMember, updateMemberAuthSettings } from "../controllers/organization.controller.js";
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -33,6 +33,9 @@ router.post("/", createOrganization);
 router.get("/user", getUserOrganizations);
 router.get("/:organizationId", getOrganization);
 router.put("/:organizationId", requireOrgPermission("organization:manage"), updateOrganization);
+// Owner-only; the controller checks isOrganizationOwner directly so the rule
+// does not drift if organization:manage is ever granted to another role.
+router.put("/:organizationId/auth-settings", updateMemberAuthSettings);
 
 // Member management
 router.get("/:organizationId/members", getMembers);

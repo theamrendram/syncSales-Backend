@@ -1,3 +1,4 @@
+import { z } from "zod";
 import prisma from "../utils/prismaClient.js";
 import { DEFAULT_ORG_ROLES } from "../utils/default-org-roles.js";
 import { upsertMembership, removeMembership } from "../lib/membership.js";
@@ -447,4 +448,51 @@ const getUserOrganizations = async (req, res) => {
   }
 };
 
-export { createOrganization, getOrganization, updateOrganization, addMember, removeMember, getMembers, getUserOrganizations };
+// Owner-only: whether members other than the owner may set/reset a password
+// or link a Google account. Enforcement lives in src/lib/member-auth-policy.js.
+const memberAuthSettingsSchema = z
+  .object({
+    allowMemberPasswordManagement: z.boolean().optional(),
+    allowMemberSocialLinking: z.boolean().optional(),
+  })
+  .strict();
+
+const updateMemberAuthSettings = async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+    if (
+      !req.authContext ||
+      req.authContext.organizationId !== organizationId ||
+      !req.authContext.isOrganizationOwner
+    ) {
+      return res
+        .status(403)
+        .json({ error: "Only the organization owner can change these settings" });
+    }
+
+    const parsed = memberAuthSettingsSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid settings" });
+    }
+
+    const data = await prisma.organization.update({
+      where: { id: organizationId },
+      data: parsed.data,
+      select: {
+        allowMemberPasswordManagement: true,
+        allowMemberSocialLinking: true,
+      },
+    });
+
+    req.log.info(
+      { evt: "member_auth_settings_updated", organizationId, ...data },
+      "member auth settings updated",
+    );
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    req.log.error({ err: error }, "failed to update member auth settings");
+    return res.status(500).json({ error: "Failed to update settings" });
+  }
+};
+
+export { createOrganization, getOrganization, updateOrganization, addMember, removeMember, getMembers, getUserOrganizations, updateMemberAuthSettings };

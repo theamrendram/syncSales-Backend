@@ -85,6 +85,13 @@ model Organization {
   // and the backfill assigns real slugs.
   slug           String?              @unique
   metadata       String?
+
+  // Whether members other than the owner may manage how they sign in. The
+  // owner always can. Enforced in src/lib/member-auth-policy.js, which every
+  // credential/Google account write goes through.
+  allowMemberPasswordManagement Boolean @default(false)
+  allowMemberSocialLinking      Boolean @default(false)
+
   campaigns      Campaign[]
   leads          Lead[]
   owner          User?                @relation("Owner", fields: [ownerId], references: [id])

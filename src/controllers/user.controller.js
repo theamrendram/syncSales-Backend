@@ -133,7 +133,13 @@ const getUser = async (req, res) => {
   }
 };
 
-export { addUser, getUser, getAllUsers, addUserAPI, getUserAPI };
+export {
+  addUser,
+  getUser,
+  getAllUsers,
+  addUserAPI,
+  getUserAPI,
+};
 
 // {
 //     "id": "74185bb4-dc74-47d1-9b68-222717c423c9",

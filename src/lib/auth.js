@@ -18,6 +18,7 @@ import { ORG_ROLES, DEFAULT_ROLE } from "./org-roles.js";
 import { DEFAULT_ORG_ROLES } from "../utils/default-org-roles.js";
 import { generateKey } from "../utils/generate-key.js";
 import { upsertMembership } from "./membership.js";
+import { assertMemberAuthAllowed, getMemberAuthPolicy } from "./member-auth-policy.js";
 
 const APP_URL = process.env.APP_URL || "http://localhost:3000";
 const CRM_URL = process.env.CRM_URL || "http://localhost:3001";
@@ -108,6 +109,17 @@ export const auth = betterAuth({
     enabled: true,
     requireEmailVerification: true,
     sendResetPassword: async ({ user, url }) => {
+      // The endpoint answers the same whether or not an email goes out, so
+      // suppressing it here gates the reset without telling the caller which
+      // addresses belong to members who may not reset.
+      const policy = await getMemberAuthPolicy(user.id);
+      if (!policy.canManagePassword) {
+        logger.info(
+          { evt: "reset_password_suppressed", userId: user.id },
+          "password reset email not sent: disabled for organization members",
+        );
+        return;
+      }
       const { subject, html } = resetPasswordTemplate({
         name: user.name,
         url: withAppCallback(url, "/auth?reset=done"),
@@ -172,6 +184,22 @@ export const auth = betterAuth({
               },
               "admin impersonation session created",
             );
+          }
+        },
+      },
+    },
+    account: {
+      create: {
+        // Every way an account row appears — /link-social, the implicit Google
+        // linking on sign-in (accountLinking.trustedProviders), setPassword and
+        // /reset-password for a user with no password yet — goes through here,
+        // so this one check enforces the organization's member options on all
+        // of them.
+        before: async (account) => {
+          if (account.providerId === "google") {
+            await assertMemberAuthAllowed(account.userId, "social");
+          } else if (account.providerId === "credential") {
+            await assertMemberAuthAllowed(account.userId, "password");
           }
         },
       },
@@ -338,6 +366,28 @@ export const auth = betterAuth({
      * later appeared in ADMIN_USER_IDS.
      */
     before: createAuthMiddleware(async (ctx) => {
+      // Password changes update an existing account row, which the
+      // account.create hook never sees, so they are gated by path instead.
+      if (ctx.path === "/change-password") {
+        const session = await getSessionFromCtx(ctx).catch(() => null);
+        if (session?.user?.id) {
+          await assertMemberAuthAllowed(session.user.id, "password");
+        }
+        return;
+      }
+      if (ctx.path === "/reset-password") {
+        const token = ctx.body?.token || ctx.query?.token;
+        const verification = token
+          ? await ctx.context.internalAdapter
+            .findVerificationValue(`reset-password:${token}`)
+            .catch(() => null)
+          : null;
+        if (verification?.value) {
+          await assertMemberAuthAllowed(verification.value, "password");
+        }
+        return;
+      }
+
       if (!ctx.path?.startsWith("/admin/")) return;
 
       // The one /admin/* path that must stay open to a non-admin session.
