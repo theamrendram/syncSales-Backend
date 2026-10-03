@@ -48,6 +48,7 @@ model User {
   address                 String?
   phone                   String?
   organizationId          String?
+  organization            Organization?        @relation("UserOrganization", fields: [organizationId], references: [id])
   ownedCampaigns          Campaign[]           @relation("CampaignOwner")
   leads                   Lead[]
   ownedOrganization       Organization?        @relation("Owner")
@@ -62,6 +63,8 @@ model User {
   sessions                Session[]
   accounts                Account[]
   sentInvitations         Invitation[]         @relation("InvitationInviter")
+
+  @@index([organizationId])
 }
 
 model Organization {
@@ -85,6 +88,9 @@ model Organization {
   campaigns      Campaign[]
   leads          Lead[]
   owner          User?                @relation("Owner", fields: [ownerId], references: [id])
+  // Users whose User.organizationId points here (their active organization).
+  // Membership itself lives in OrganizationMember.
+  users          User[]               @relation("UserOrganization")
   members        OrganizationMember[]
   payments       Payment[]
   Role           Role[]

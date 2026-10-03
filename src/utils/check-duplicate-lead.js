@@ -1,16 +1,24 @@
 import prismaClient from "../utils/prismaClient.js";
 
-const checkDuplicateLead = async (phone, campaign, timer) => {
-  const lead_period = campaign.lead_period;
+// Earliest createdAt that still counts as a duplicate, or null when the
+// campaign has no window (every earlier lead with the phone counts).
+const duplicateCutoff = (leadPeriod) => {
+  if (!leadPeriod) {
+    return null;
+  }
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - leadPeriod);
+  return cutoffDate;
+};
 
+const checkDuplicateLead = async (phone, campaign, timer) => {
   const whereClause = {
     phone,
     campaignId: campaign.id,
   };
 
-  if (lead_period) {
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - lead_period);
+  const cutoffDate = duplicateCutoff(campaign.lead_period);
+  if (cutoffDate) {
     whereClause.createdAt = {
       gte: cutoffDate,
     };
@@ -28,4 +36,4 @@ const checkDuplicateLead = async (phone, campaign, timer) => {
   return !!lead;
 };
 
-export { checkDuplicateLead };
+export { checkDuplicateLead, duplicateCutoff };

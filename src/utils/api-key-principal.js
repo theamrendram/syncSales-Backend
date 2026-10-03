@@ -10,7 +10,10 @@ const resolveApiKeyPrincipal = async (apiKey, timer) => {
     return null;
   }
 
-  timer?.time("db:user.findUnique(apiKey)");
+  // One round trip: the key owner, their organization's owner and both plans
+  // come back joined, so neither the org lookup nor the plan-owner lookup costs
+  // a separate query.
+  timer?.time("db:user.findUnique(apiKey+org owner)");
   const user = await prismaClient.user.findUnique({
     relationLoadStrategy: "join",
     where: { apiKey: normalizedApiKey },
@@ -24,47 +27,52 @@ const resolveApiKeyPrincipal = async (apiKey, timer) => {
           dailyLeadsLimit: true,
         },
       },
+      organization: {
+        select: {
+          ownerId: true,
+          owner: {
+            select: {
+              id: true,
+              organizationId: true,
+              userPlan: { select: { dailyLeadsLimit: true } },
+            },
+          },
+        },
+      },
     },
   });
-  timer?.timeEnd("db:user.findUnique(apiKey)");
+  timer?.timeEnd("db:user.findUnique(apiKey+org owner)");
 
   if (!user) {
     return null;
   }
 
-  // The plan owner is usually the key owner, so its plan rides along with this
-  // query. When it is not — a member posting against their organization's plan —
-  // planUserResolved is false and the caller fetches the plan owner itself.
-  const selfPlanUser = {
-    id: user.id,
-    organizationId: user.organizationId || null,
-    userPlan: user.userPlan || null,
-  };
-
   // Lead quota belongs to the organization, and the organization's plan hangs off
   // its owner. A member who is not the owner therefore bills against the owner's
   // plan — which used to be a rule about webmasters specifically, and is now
   // simply what being a member means.
-  let planUserId = user.id;
-  if (user.organizationId) {
-    timer?.time("db:organization.findUnique(owner)");
-    const org = await prismaClient.organization.findUnique({
-      where: { id: user.organizationId },
-      select: { ownerId: true },
-    });
-    timer?.timeEnd("db:organization.findUnique(owner)");
-    if (org?.ownerId) {
-      planUserId = org.ownerId;
-    }
-  }
+  const owner = user.organization?.owner ?? null;
+  const planUser = owner
+    ? {
+        id: owner.id,
+        organizationId: owner.organizationId || null,
+        userPlan: owner.userPlan || null,
+      }
+    : {
+        id: user.id,
+        organizationId: user.organizationId || null,
+        userPlan: user.userPlan || null,
+      };
 
   return {
     type: "user",
     apiKey: normalizedApiKey,
     actorUserId: user.id,
-    planUserId,
-    planUserResolved: planUserId === user.id,
-    planUser: planUserId === user.id ? selfPlanUser : null,
+    planUserId: planUser.id,
+    // Always resolved now that the owner's plan rides along; kept so callers
+    // that still check it skip their fallback lookup.
+    planUserResolved: true,
+    planUser,
     organizationId: user.organizationId || null,
     isActive: user.isActive,
   };

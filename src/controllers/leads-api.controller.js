@@ -1,11 +1,10 @@
 import prismaClient from "../utils/prismaClient.js";
 import { randomUUID } from "crypto";
 import { sendWebhook } from "../utils/sendWebhook.js";
-import { checkDuplicateLead } from "../utils/check-duplicate-lead.js";
+import { duplicateCutoff } from "../utils/check-duplicate-lead.js";
 import getClientIp from "../utils/get-client-ip.js";
 import { encodePublicOrgLeadId } from "../utils/org-lead-id.js";
 import { resolveApiKeyPrincipal } from "../utils/api-key-principal.js";
-import { hasResourceGrants } from "../utils/resource-grants.js";
 import logger from "../utils/logger.js";
 import { logLeadOutcome, fingerprintApiKey, phoneLast4 } from "../utils/lead-log.js";
 
@@ -15,6 +14,23 @@ const leadModelHasOrgLeadId =
   );
 
 // ----- START utility functions ------
+// What lead creation needs from the campaign, whichever way it was resolved.
+const LEAD_CAMPAIGN_SELECT = {
+  id: true,
+  routeId: true,
+  lead_period: true,
+  organizationId: true,
+  route: {
+    select: {
+      url: true,
+      method: true,
+      attributes: true,
+      hasWebhook: true,
+      organizationId: true,
+    },
+  },
+};
+
 // Columns written from leadData, in a fixed order. "date"/"createdAt" are left
 // to their DB defaults; "id"/"updatedAt" have none, so they are supplied here.
 const LEAD_INSERT_COLUMNS = [
@@ -38,7 +54,18 @@ const LEAD_INSERT_COLUMNS = [
 // One statement instead of an interactive transaction: BEGIN/COMMIT alone cost
 // two network round trips, and each nested query cost another. A single
 // data-modifying CTE is still atomic and runs in one round trip.
-const createLead = async (leadData, usageUserId, organizationId, timer) => {
+//
+// With duplicateCheck ({ phone, campaignId, cutoff }), the duplicate verdict is
+// made inside the same statement: the row is stored as "Duplicate" when an
+// earlier lead with that phone exists in the campaign since cutoff (or ever,
+// when cutoff is null). Callers read the verdict from the returned status.
+const createLead = async (
+  leadData,
+  usageUserId,
+  organizationId,
+  timer,
+  duplicateCheck,
+) => {
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
 
@@ -66,8 +93,24 @@ const createLead = async (leadData, usageUserId, organizationId, timer) => {
     : "";
 
   const idParam = bind(randomUUID(), "text");
+  const statusExpression = (status) => {
+    if (!duplicateCheck) {
+      return bind(status, "text");
+    }
+    const windowClause = duplicateCheck.cutoff
+      ? ` AND "createdAt" >= ${bind(duplicateCheck.cutoff, "timestamp(3)")}`
+      : "";
+    return `CASE WHEN EXISTS (
+        SELECT 1 FROM "Lead"
+        WHERE "phone" = ${bind(duplicateCheck.phone, "text")}
+          AND "campaignId" = ${bind(duplicateCheck.campaignId, "text")}${windowClause}
+      ) THEN 'Duplicate' ELSE ${bind(status, "text")} END`;
+  };
+
   const leadValueParams = LEAD_INSERT_COLUMNS.map((column) =>
-    bind(leadData[column] ?? null, "text"),
+    column === "status"
+      ? statusExpression(leadData.status ?? null)
+      : bind(leadData[column] ?? null, "text"),
   );
   const updatedAtParam = bind(new Date(), "timestamp(3)");
 
@@ -148,22 +191,14 @@ const handleWebhookAsync = async (route, lead, log) => {
   }
 };
 
-const handleDuplicateLead = async (
-  leadData,
+const handleDuplicateLead = (
+  duplicateLead,
   principalWithCampaign,
   organizationId,
   req,
   res,
-  timer,
   logFields,
 ) => {
-  const duplicateLead = await createLead(
-    { ...leadData, status: "Duplicate" },
-    principalWithCampaign.usageUserId,
-    organizationId,
-    timer,
-  );
-
   // Send response immediately, handle webhook asynchronously
   const route = principalWithCampaign.campaigns[0]?.route;
   if (route?.hasWebhook) {
@@ -194,22 +229,14 @@ const handleDuplicateLead = async (
   });
 };
 
-const handleNewLead = async (
-  leadData,
+const handleNewLead = (
+  lead,
   principalWithCampaign,
   organizationId,
   req,
   res,
-  timer,
   logFields,
 ) => {
-  const lead = await createLead(
-    leadData,
-    principalWithCampaign.usageUserId,
-    organizationId,
-    timer,
-  );
-
   // Send response immediately, handle webhook asynchronously
   const route = principalWithCampaign.campaigns[0]?.route;
   if (route?.hasWebhook) {
@@ -259,90 +286,61 @@ const getPrincipalWithCampaign = async (
     return null;
   }
 
-  // A member with explicit campaign grants resolves the campaign through those
-  // grants; a member without resolves it through the campaigns they own. This
-  // used to be "webmaster or not", which was the same distinction wearing a
-  // different name.
-  const narrowed = principal.organizationId
-    ? await hasResourceGrants(principal.actorUserId, principal.organizationId)
-    : false;
+  // A member with explicit grants (campaign or route, as hasResourceGrants
+  // counts them) resolves the campaign through their campaign grants; a member
+  // without resolves it through the campaigns they own. The owned campaign, the
+  // granted campaign and the grant counts all come back in one joined query, so
+  // deciding which applies costs no extra round trip.
+  const organizationId = principal.organizationId;
 
-  if (!narrowed) {
-    timer?.time("db:user.findUnique(+ownedCampaigns)");
-    const userWithCampaign = await prismaClient.user.findUnique({
-      relationLoadStrategy: "join",
-      where: { apiKey: principal.apiKey },
-      select: {
-        id: true,
-        ownedCampaigns: {
-          where: { campId },
-          select: {
-            id: true,
-            routeId: true,
-            lead_period: true,
-            organizationId: true,
-            route: {
-              select: {
-                url: true,
-                method: true,
-                attributes: true,
-                hasWebhook: true,
-                organizationId: true,
-              },
-            },
-          },
-        },
-      },
-    });
-    timer?.timeEnd("db:user.findUnique(+ownedCampaigns)");
-
-    if (!userWithCampaign) {
-      return null;
-    }
-
-    return {
-      ...principal,
-      id: userWithCampaign.id,
-      usageUserId: principal.planUserId,
-      campaigns: userWithCampaign.ownedCampaigns ?? [],
-    };
-  }
-
-  timer?.time("db:campaign.findFirst");
-  const campaign = await prismaClient.campaign.findFirst({
+  timer?.time("db:user.findUnique(campaign+grants)");
+  const userWithCampaign = await prismaClient.user.findUnique({
     relationLoadStrategy: "join",
-    where: {
-      campId,
-      organizationId: principal.organizationId || undefined,
-      campaignGrants: {
-        some: { userId: principal.actorUserId },
-      },
-    },
+    where: { id: principal.actorUserId },
     select: {
       id: true,
-      routeId: true,
-      lead_period: true,
-      organizationId: true,
-      route: {
-        select: {
-          url: true,
-          method: true,
-          attributes: true,
-          hasWebhook: true,
-          organizationId: true,
-        },
+      ownedCampaigns: {
+        where: { campId },
+        select: LEAD_CAMPAIGN_SELECT,
       },
+      ...(organizationId && {
+        campaignGrants: {
+          where: { campaign: { campId, organizationId } },
+          take: 1,
+          select: { campaign: { select: LEAD_CAMPAIGN_SELECT } },
+        },
+        _count: {
+          select: {
+            campaignGrants: { where: { campaign: { organizationId } } },
+            resourceAccess: { where: { organizationId } },
+          },
+        },
+      }),
     },
   });
-  timer?.timeEnd("db:campaign.findFirst");
+  timer?.timeEnd("db:user.findUnique(campaign+grants)");
+
+  if (!userWithCampaign) {
+    return null;
+  }
+
+  const narrowed =
+    !!organizationId &&
+    (userWithCampaign._count.campaignGrants > 0 ||
+      userWithCampaign._count.resourceAccess > 0);
+
+  const grantedCampaign = userWithCampaign.campaignGrants?.[0]?.campaign;
+  const campaigns = narrowed
+    ? grantedCampaign
+      ? [grantedCampaign]
+      : []
+    : userWithCampaign.ownedCampaigns ?? [];
 
   return {
     ...principal,
-    id: principal.actorUserId,
+    id: userWithCampaign.id,
     usageUserId: principal.planUserId,
-    campaigns: campaign ? [campaign] : [],
-    organizationId: principal.organizationId,
-    isActive: principal.isActive,
+    campaigns,
   };
 };
 
@@ -535,13 +533,6 @@ const processLeadRequest = async (req, res, source) => {
       });
     }
 
-    timer?.time("step:checkDuplicateLead");
-    const isDuplicate = await checkDuplicateLead(
-      sanitizedPhone,
-      campaign,
-      timer,
-    );
-    timer?.timeEnd("step:checkDuplicateLead");
     const leadData = {
       firstName: firstName.trim(),
       lastName: lastName?.trim() || null,
@@ -560,35 +551,42 @@ const processLeadRequest = async (req, res, source) => {
       userId: principalWithCampaign.id,
     };
 
-    if (isDuplicate) {
-      timer?.time("step:handleDuplicateLead");
-      const duplicateResponse = await handleDuplicateLead(
-        leadData,
+    // The duplicate check runs inside the insert; the stored status says which
+    // way it went.
+    timer?.time("step:createLead");
+    const lead = await createLead(
+      leadData,
+      principalWithCampaign.usageUserId,
+      organizationId,
+      timer,
+      {
+        phone: sanitizedPhone,
+        campaignId: campaign.id,
+        cutoff: duplicateCutoff(campaign.lead_period),
+      },
+    );
+    timer?.timeEnd("step:createLead");
+    timer?.timeEnd("handler:addLead");
+
+    if (lead.status === "Duplicate") {
+      return handleDuplicateLead(
+        lead,
         principalWithCampaign,
         organizationId,
         req,
         res,
-        timer,
         { ...logFields, leadPeriod: campaign.lead_period },
       );
-      timer?.timeEnd("step:handleDuplicateLead");
-      timer?.timeEnd("handler:addLead");
-      return duplicateResponse;
     }
 
-    timer?.time("step:handleNewLead");
-    const newLeadResponse = await handleNewLead(
-      leadData,
+    return handleNewLead(
+      lead,
       principalWithCampaign,
       organizationId,
       req,
       res,
-      timer,
       logFields,
     );
-    timer?.timeEnd("step:handleNewLead");
-    timer?.timeEnd("handler:addLead");
-    return newLeadResponse;
   } catch (error) {
     // The response is a 400 for the caller, but reaching here is a server-side
     // failure, so it is logged at error level.
