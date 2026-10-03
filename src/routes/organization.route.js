@@ -4,7 +4,7 @@ import multer from "multer";
 import path from "path";
 const router = express.Router();
 
-import { createOrganization, getUserOrganizations, getOrganization, updateOrganization, getMembers, addMember, removeMember, updateMemberAuthSettings } from "../controllers/organization.controller.js";
+import { createOrganization, getUserOrganizations, getOrganization, updateOrganization, getMembers, addMember, removeMember, updateMemberAuthSettings, getCurrentOrganization, updateMemberRole } from "../controllers/organization.controller.js";
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -31,6 +31,8 @@ const upload = multer({
 // Organization CRUD
 router.post("/", createOrganization);
 router.get("/user", getUserOrganizations);
+// Before "/:organizationId" so "current" is not read as an id.
+router.get("/current", getCurrentOrganization);
 router.get("/:organizationId", getOrganization);
 router.put("/:organizationId", requireOrgPermission("organization:manage"), updateOrganization);
 // Owner-only; the controller checks isOrganizationOwner directly so the rule
@@ -38,7 +40,8 @@ router.put("/:organizationId", requireOrgPermission("organization:manage"), upda
 router.put("/:organizationId/auth-settings", updateMemberAuthSettings);
 
 // Member management
-router.get("/:organizationId/members", getMembers);
+router.get("/:organizationId/members", requireOrgPermission("member:manage"), getMembers);
+router.patch("/:organizationId/members/:memberId", requireOrgPermission("member:manage"), updateMemberRole);
 router.post("/:organizationId/members", requireOrgPermission("member:manage"), addMember);
 router.delete("/:organizationId/members/:memberId", requireOrgPermission("member:manage"), removeMember);
 

@@ -14,7 +14,8 @@ import {
   resetPasswordTemplate,
   organizationInviteTemplate,
 } from "./email/templates.js";
-import { ORG_ROLES, DEFAULT_ROLE } from "./org-roles.js";
+import { DEFAULT_ROLE } from "./org-roles.js";
+import { ac, PLUGIN_ROLES, ASSIGNABLE_ROLES } from "./org-access-control.js";
 import { DEFAULT_ORG_ROLES } from "../utils/default-org-roles.js";
 import { generateKey } from "../utils/generate-key.js";
 import { upsertMembership } from "./membership.js";
@@ -262,7 +263,10 @@ export const auth = betterAuth({
           },
         },
       },
-      roles: ORG_ROLES,
+      // Grants for the plugin's own endpoints (invitations, member routes). The
+      // API's permissions still come from org-roles.js; see org-access-control.js.
+      ac,
+      roles: PLUGIN_ROLES,
       creatorRole: "owner",
       defaultRole: DEFAULT_ROLE,
       organizationHooks: {
@@ -319,6 +323,57 @@ export const auth = betterAuth({
             logger.error(
               { err, organizationId: organization.id },
               "failed to seed legacy role/member rows for new organization",
+            );
+          }
+        },
+
+        // The plugin only refuses "owner" when the inviter is not one. Ownership
+        // carries billing and is never handed out by invitation, whoever asks.
+        beforeCreateInvitation: async ({ invitation }) => {
+          const roles = String(invitation.role || "").split(",").map((r) => r.trim());
+          if (!roles.length || roles.some((r) => !ASSIGNABLE_ROLES.includes(r))) {
+            throw new APIError("BAD_REQUEST", {
+              code: "INVALID_INVITATION_ROLE",
+              message: `Role must be one of: ${ASSIGNABLE_ROLES.join(", ")}`,
+            });
+          }
+        },
+
+        // One organization per user is assumed downstream: /api/v1/user reads
+        // the first membership, as do the member auth policy and the API-key
+        // path. Joining a second would silently pick one of them.
+        beforeAcceptInvitation: async ({ user, organization }) => {
+          const [owned, membership] = await Promise.all([
+            prisma.organization.findUnique({
+              where: { ownerId: user.id },
+              select: { id: true },
+            }),
+            prisma.organizationMember.findFirst({
+              where: { userId: user.id, NOT: { organizationId: organization.id } },
+              select: { id: true },
+            }),
+          ]);
+          if (owned || membership) {
+            throw new APIError("BAD_REQUEST", {
+              code: "ALREADY_IN_ORGANIZATION",
+              message: "You already belong to an organization",
+            });
+          }
+        },
+
+        // The plugin writes the member row; the shared helper also fills
+        // User.organizationId, which the API-key path reads.
+        afterAcceptInvitation: async ({ member, user, organization }) => {
+          try {
+            await upsertMembership({
+              userId: user.id,
+              organizationId: organization.id,
+              role: member.role,
+            });
+          } catch (err) {
+            logger.error(
+              { err, organizationId: organization.id, userId: user.id },
+              "failed to sync membership after accepting invitation",
             );
           }
         },
