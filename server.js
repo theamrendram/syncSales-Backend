@@ -1,5 +1,6 @@
 import app from "./src/app.js";
 import { config, validateEnv } from "./src/config/env.js";
+import { verifyEmailTransport } from "./src/lib/email/index.js";
 import logger from "./src/utils/logger.js";
 import { registerProcessGuards } from "./src/utils/process-guards.js";
 
@@ -25,4 +26,7 @@ if (config.memoryMonitorEnabled) {
 
 app.listen(config.port, () => {
   logger.info({ port: config.port }, "Server is running");
+  // Not awaited: an SMTP handshake shouldn't delay serving requests.
+  // verifyEmailTransport() catches its own errors and logs the result.
+  void verifyEmailTransport();
 });
