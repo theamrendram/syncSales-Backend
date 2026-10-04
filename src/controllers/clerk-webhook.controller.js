@@ -1,7 +1,7 @@
 import prisma from "../utils/prismaClient.js";
 import { Webhook } from "svix";
 import logger from "../utils/logger.js";
-import { generateKey } from "../utils/generate-key.js";
+import { placeholderApiKey } from "../lib/api-keys.js";
 
 // Handle Clerk webhook events
 const handleClerkWebhook = async (req, res) => {
@@ -89,7 +89,7 @@ async function handleUserCreated(data) {
         email,
         firstName: data.first_name || "",
         lastName: data.last_name || "",
-        apiKey: generateKey(),
+        apiKey: placeholderApiKey(),
       },
     });
 

@@ -1,4 +1,5 @@
 import prisma from "../utils/prismaClient.js";
+import { syncApiKeyForRole } from "../lib/api-keys.js";
 
 function assertRoleRouteContext(req, organizationId) {
   return (
@@ -153,6 +154,10 @@ const updateMemberRole = async (req, res) => {
         },
       },
     });
+
+    // Writes the role directly rather than through upsertMembership, so the key
+    // that goes with the role is synced here too.
+    await syncApiKeyForRole(member.userId, newRole.name);
 
     res.json({
       success: true,

@@ -21,6 +21,26 @@ const buildRoutePayload = (body) => {
   return payload;
 };
 
+/**
+ * What a publisher may see of a route. The webhook fields (url, method,
+ * attributes) point at the client's own CRM and can carry its credentials, so a
+ * publisher — an outside lead source — gets the descriptive fields only.
+ */
+const PUBLISHER_ROUTE_SELECT = {
+  id: true,
+  name: true,
+  routeId: true,
+  product: true,
+  description: true,
+  payout: true,
+  createdAt: true,
+};
+
+const routeSelectFor = (req) =>
+  req.authContext?.membership?.role === "publisher"
+    ? { select: PUBLISHER_ROUTE_SELECT }
+    : {};
+
 const getMissingRequiredFields = (body) =>
   ROUTE_REQUIRED_FIELDS.filter((field) => body[field] === undefined);
 
@@ -69,6 +89,7 @@ const getRoutes = async (req, res) => {
 
     const routes = await prismaClient.route.findMany({
       where,
+      ...routeSelectFor(req),
       orderBy: { createdAt: "desc" },
       take,
     });
@@ -132,6 +153,7 @@ const getRouteById = async (req, res) => {
           // AND rather than a spread: a webmaster's scope constrains `id`
           // itself, and merging would let it overwrite the id being requested.
           where: { AND: [{ id }, scope.where, { deletedAt: null }] },
+          ...routeSelectFor(req),
         });
     if (!route) {
       return res.status(404).json({ success: false, error: "Route not found" });

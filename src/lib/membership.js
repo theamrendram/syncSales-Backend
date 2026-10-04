@@ -14,6 +14,7 @@
 import prisma from "../utils/prismaClient.js";
 import { DEFAULT_ROLE, isKnownRole } from "./org-roles.js";
 import { ensureDefaultRolesForOrganization } from "../utils/default-org-roles.js";
+import { syncApiKeyForRole, revokeApiKey } from "./api-keys.js";
 
 /**
  * Adds or updates a membership.
@@ -54,6 +55,11 @@ export async function upsertMembership({
     where: { id: userId, organizationId: null },
     data: { organizationId },
   });
+
+  // The role decides whether this user holds an API key (owner, admin and
+  // publisher do). Done here because this is the one place a role is set, so
+  // no call site can grant a role and forget the key that goes with it.
+  await syncApiKeyForRole(userId, role, client);
 }
 
 export async function removeMembership({
@@ -64,6 +70,14 @@ export async function removeMembership({
   await client.organizationMember.deleteMany({
     where: { userId, organizationId },
   });
+
+  // A removed member's key would otherwise keep posting leads into an
+  // organization they no longer belong to. One organization per user, so with
+  // no membership left there is nothing the key is still for.
+  const remaining = await client.organizationMember.count({ where: { userId } });
+  if (!remaining) {
+    await revokeApiKey(userId, client);
+  }
 
   // Leave User.organizationId alone. Clearing it would strip the user's API-key
   // organization even when they still belong elsewhere, and choosing a

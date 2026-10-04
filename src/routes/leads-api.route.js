@@ -1,4 +1,4 @@
-import { addLead, addLeadGet, updateLead } from "../controllers/leads-api.controller.js";
+import { addLead, addLeadGet } from "../controllers/leads-api.controller.js";
 import { LeadsLimiter } from "../middlewares/rate-limiter.middleware.js";
 import { checkUserPlan } from "../utils/check-user-plan.js";
 import { requestTiming } from "../utils/request-timer.js";
@@ -28,7 +28,6 @@ router.get(
   checkUserPlan,
   addLeadGet,
 );
-router.put("/update", updateLead);
 router.get("/", (req, res) => {
   res.send("GET / Method not allowed");
 });

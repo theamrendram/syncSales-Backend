@@ -53,6 +53,19 @@ const campaignSelect = {
   },
 };
 
+/**
+ * A publisher sees a campaign's route by name only. The route's url and method
+ * point at the client's CRM, which is not an outside lead source's business —
+ * see PUBLISHER_ROUTE_SELECT in route.controller.js.
+ */
+const campaignSelectFor = (req) =>
+  req.authContext?.membership?.role === "publisher"
+    ? {
+        ...campaignSelect,
+        route: { select: { id: true, name: true, product: true, payout: true } },
+      }
+    : campaignSelect;
+
 const getCampaigns = async (req, res) => {
   try {
     const take = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
@@ -80,7 +93,7 @@ const getCampaigns = async (req, res) => {
 
     const campaigns = await prismaClient.campaign.findMany({
       where,
-      select: campaignSelect,
+      select: campaignSelectFor(req),
       orderBy: { createdAt: "desc" },
       take,
     });
@@ -113,7 +126,7 @@ const getCampaignById = async (req, res) => {
           // AND rather than a spread: a webmaster's scope constrains `id`
           // itself, and merging would let it overwrite the id being requested.
           where: { AND: [{ id }, scope.where, { isArchived: false }] },
-          select: campaignSelect,
+          select: campaignSelectFor(req),
         });
 
     if (!campaign) {

@@ -145,7 +145,7 @@ model OrganizationMember {
   // is "member"), and a constraint would turn that into a failed insert rather
   // than a role that simply grants nothing. permissionsForRole() already falls
   // back to the least-privileged role for an unknown name, which fails closed.
-  role           String       @default("viewer")
+  role           String       @default("advertiser")
   joinedAt       DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id])
@@ -455,7 +455,7 @@ model Invitation {
   id             String   @id @default(uuid())
   organizationId String
   email          String
-  role           String   @default("viewer")
+  role           String   @default("advertiser")
   status         String   @default("pending")
   expiresAt      DateTime
   inviterId      String

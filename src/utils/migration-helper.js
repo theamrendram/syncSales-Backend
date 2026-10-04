@@ -62,7 +62,7 @@ const migrateExistingUsersToOrganizations = async () => {
 
         console.log(`Added user as owner member`);
 
-        const viewerRole = roles.find((role) => role.name === "viewer");
+        const publisherRole = roles.find((role) => role.name === "publisher");
         const webmasterUsers = await prisma.user.findMany({
           where: {
             campaignGrants: { some: {} },
@@ -81,10 +81,10 @@ const migrateExistingUsersToOrganizations = async () => {
               data: {
                 userId: wmUser.id,
                 organizationId: organization.id,
-                role: viewerRole.name,
+                role: publisherRole.name,
               },
             });
-            console.log(`Added webmaster user ${wmUser.email} as viewer member`);
+            console.log(`Added webmaster user ${wmUser.email} as publisher member`);
           }
         }
 

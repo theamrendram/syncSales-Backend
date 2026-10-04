@@ -13,7 +13,7 @@
  * grants, so a missing permission and a refused one are the same thing and no
  * caller has to tell them apart.
  *
- * These four roles were already frozen: role.controller.js rejects create,
+ * These roles are frozen: role.controller.js rejects create,
  * update and delete, so the `Role` table only ever holds these rows per
  * organization. They live here, and src/utils/default-org-roles.js seeds the
  * table from them rather than restating them.
@@ -31,6 +31,7 @@ export const RESOURCES = [
   "member",
   "role",
   "billing",
+  "apikey",
   "lead",
   "campaign",
   "route",
@@ -44,7 +45,8 @@ export const RESOURCES = [
 export const DATA_RESOURCES = ["lead", "campaign", "route"];
 // Adding, editing and removing webmasters is member management, so it needs no
 // resource of its own — `member:manage` covers it.
-export const ADMIN_RESOURCES = ["organization", "member", "role", "billing"];
+// `apikey:manage` issues, rotates and revokes publisher keys.
+export const ADMIN_RESOURCES = ["organization", "member", "role", "billing", "apikey"];
 
 export const READ = "read";
 export const WRITE = "write";
@@ -61,26 +63,41 @@ export const PERMISSIONS = [
   ...dataPermissions(DELETE),
 ];
 
-export const ORG_ROLES = ["owner", "admin", "manager", "viewer"];
+export const ORG_ROLES = ["owner", "admin", "manager", "advertiser", "publisher"];
 
-export const DEFAULT_ROLE = "viewer";
+export const DEFAULT_ROLE = "advertiser";
+
+/**
+ * Roles that only ever see what was assigned to them. For everyone else, no
+ * grants means the whole organization; for these, no grants means nothing —
+ * a freshly invited client or publisher must not see every campaign before
+ * anyone has decided what is theirs.
+ */
+export const NARROWED_ROLES = ["advertiser", "publisher"];
+
+/** Roles that may hold an API key, i.e. send leads and call the postback. */
+export const KEY_ROLES = ["owner", "admin", "publisher"];
 
 export const ROLE_DESCRIPTIONS = {
   owner: "Full access to all features",
   admin: "Administrative access",
   manager: "Manager access",
-  viewer: "Read-only access",
+  advertiser: "Sees and updates leads for assigned campaigns",
+  publisher: "Sends leads; sees only the leads they sent",
 };
+
+export const isNarrowedRole = (role) => NARROWED_ROLES.includes(role);
+export const isKeyRole = (role) => KEY_ROLES.includes(role);
 
 export const ROLE_PERMISSIONS = {
   // Everything, including the administrative resources.
   owner: [...PERMISSIONS],
 
-  // All data, and may manage members — but cannot change the organization
-  // itself, redefine roles, or touch billing. Unchanged from the previous
-  // canManage* booleans.
+  // All data, and may manage members and their API keys — but cannot change the
+  // organization itself, redefine roles, or touch billing.
   admin: [
     "member:manage",
+    "apikey:manage",
     ...dataPermissions(READ),
     ...dataPermissions(WRITE),
     ...dataPermissions(DELETE),
@@ -89,7 +106,13 @@ export const ROLE_PERMISSIONS = {
   // Read and write, but never delete.
   manager: [...dataPermissions(READ), ...dataPermissions(WRITE)],
 
-  viewer: [...dataPermissions(READ)],
+  // The client. Reads everything assigned to them and moves lead statuses; never
+  // creates or removes campaigns or routes.
+  advertiser: [...dataPermissions(READ), "lead:write"],
+
+  // An outside lead source. Reads only: leads arrive through their API key, and
+  // their status changes come back through the postback, never the dashboard.
+  publisher: [...dataPermissions(READ)],
 };
 
 /**

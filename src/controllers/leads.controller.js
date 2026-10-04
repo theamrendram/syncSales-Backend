@@ -7,6 +7,9 @@ import logger from "../utils/logger.js";
 import { logLeadOutcome, fingerprintApiKey, phoneLast4 } from "../utils/lead-log.js";
 import { Parser } from "json2csv";
 import { resolveLeadScope } from "../utils/lead-scope.js";
+import { findInScope, scopeFor } from "../utils/scope.js";
+import { LEAD_STATUSES, normalizeLeadStatus } from "../utils/lead-status.js";
+import { isKeyRole } from "../lib/org-roles.js";
 import {
   getGrantedLeadScope,
   hasResourceGrants,
@@ -53,35 +56,22 @@ const getUserWithMemberships = async (userId) =>
     },
   });
 
+/**
+ * Lead access for the list/export endpoints that predate withScope().
+ *
+ * Delegates each organization to scopeFor() in src/utils/scope.js, so these
+ * endpoints narrow exactly as the scoped ones do — including advertisers and
+ * publishers, who see nothing until something is assigned. With no
+ * organization, it is the union of the caller's organizations, each scoped.
+ */
 const getLeadAccessWhereForUser = async (user, organizationId) => {
-  // Narrowed by explicit grants rather than by a WebmasterProfile row, which no
-  // longer exists. Same rule as src/utils/scope.js: any grant narrows, none does
-  // not.
-  if (organizationId && (await hasResourceGrants(user.id, organizationId))) {
-    const { campaignIds, routeIds } = await getGrantedLeadScope(
-      user.id,
-      organizationId,
-    );
-    if (!campaignIds.length && !routeIds.length) {
-      return { where: null, isEmpty: true };
-    }
-    return {
-      where: {
-        organizationId,
-        OR: [
-          ...(campaignIds.length ? [{ campaignId: { in: campaignIds } }] : []),
-          ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
-        ],
-      },
-      isEmpty: false,
-    };
-  }
+  const roleByOrg = new Map(
+    user.organizationMemberships.map((m) => [m.organizationId, m.role]),
+  );
 
+  let orgIds;
   if (organizationId) {
-    const membership = user.organizationMemberships.find(
-      (m) => m.organizationId === organizationId,
-    );
-    if (!membership) {
+    if (!roleByOrg.has(organizationId)) {
       const org = await prismaClient.organization.findUnique({
         where: { id: organizationId },
         select: { ownerId: true },
@@ -90,23 +80,34 @@ const getLeadAccessWhereForUser = async (user, organizationId) => {
         return { where: null, isForbidden: true };
       }
     }
-    return { where: { organizationId }, isEmpty: false };
+    orgIds = [organizationId];
+  } else {
+    const ownedOrgs = await prismaClient.organization.findMany({
+      where: { ownerId: user.id },
+      select: { id: true },
+    });
+    orgIds = [...new Set([...roleByOrg.keys(), ...ownedOrgs.map((o) => o.id)])];
   }
 
-  const membershipOrgIds = user.organizationMemberships.map(
-    (m) => m.organizationId,
+  const scopes = await Promise.all(
+    orgIds.map((orgId) =>
+      scopeFor({
+        userId: user.id,
+        organizationId: orgId,
+        role: roleByOrg.get(orgId) ?? null,
+        resource: "lead",
+      }),
+    ),
   );
-  const ownedOrgs = await prismaClient.organization.findMany({
-    where: { ownerId: user.id },
-    select: { id: true },
-  });
-  const ownedOrgIds = ownedOrgs.map((o) => o.id);
-  const orgIds = Array.from(new Set([...membershipOrgIds, ...ownedOrgIds]));
+  const wheres = scopes.filter((sc) => sc.ok && !sc.empty).map((sc) => sc.where);
 
-  if (!orgIds.length) {
+  if (!wheres.length) {
     return { where: null, isEmpty: true };
   }
-  return { where: { organizationId: { in: orgIds } }, isEmpty: false };
+  return {
+    where: wheres.length === 1 ? wheres[0] : { OR: wheres },
+    isEmpty: false,
+  };
 };
 
 const getLeads = async (req, res) => {
@@ -157,8 +158,10 @@ const getLeads = async (req, res) => {
     }
     const scopeWhere = scope.where;
 
-    const where = {
-      ...scopeWhere,
+    // Filters sit beside the scope under AND, never spread into it: the
+    // search's OR would otherwise replace the scope's own OR (the grant
+    // narrowing) and return every lead in the organization.
+    const filters = {
       ...(search && {
         OR: [
           { firstName: { contains: search, mode: "insensitive" } },
@@ -187,6 +190,7 @@ const getLeads = async (req, res) => {
           },
         }),
     };
+    const where = { AND: [scopeWhere, filters] };
 
     // Get total count for pagination
     const total = await prismaClient.lead.count({ where });
@@ -268,6 +272,7 @@ const addLead = async (req, res) => {
       select: {
         id: true,
         isActive: true,
+        ownedOrganization: { select: { id: true } },
         organizationMemberships: {
               select: {
             organizationId: true,
@@ -386,6 +391,23 @@ const addLead = async (req, res) => {
           .status(403)
           .json({ error: "Access denied to this organization" });
       }
+    }
+
+    // Only owners, admins and publishers hold usable keys. An advertiser or
+    // manager may still have a key from before roles decided this; refuse it.
+    const keyRole = userWithCampaign.organizationMemberships.find(
+      (membership) => membership.organizationId === campaign.organizationId,
+    )?.role;
+    const isOrgOwnerKey =
+      userWithCampaign.ownedOrganization?.id === campaign.organizationId;
+    if (!isOrgOwnerKey && !isKeyRole(keyRole)) {
+      logLeadOutcome(req, {
+        ...logFields,
+        outcome: "key_role_denied",
+        status: 403,
+        actorUserId: userWithCampaign.id,
+      });
+      return res.status(403).json({ error: "This API key cannot send leads" });
     }
 
     // Check for duplicate lead
@@ -628,11 +650,12 @@ const getLeadsByUserPagination = async (req, res) => {
     if (access.isEmpty) {
       return res.json({ data: [], total: 0, page: pageNumber, totalPages: 0 });
     }
-    const where = { ...access.where };
+    // AND, not a spread: see getLeads.
+    const filters = {};
 
     // Search filter
     if (search) {
-      where.OR = [
+      filters.OR = [
         { firstName: { contains: search, mode: "insensitive" } },
         { lastName: { contains: search, mode: "insensitive" } },
         { phone: { contains: search, mode: "insensitive" } },
@@ -642,7 +665,7 @@ const getLeadsByUserPagination = async (req, res) => {
 
     // Status filter
     if (status && status !== "all") {
-      where.status = { equals: status, mode: "insensitive" };
+      filters.status = { equals: status, mode: "insensitive" };
     }
 
     // Campaign filter (comma-separated ids)
@@ -652,7 +675,7 @@ const getLeadsByUserPagination = async (req, res) => {
         .map((id) => String(id).trim())
         .filter(Boolean);
       if (ids.length) {
-        where.campaignId = { in: ids };
+        filters.campaignId = { in: ids };
       }
     }
 
@@ -661,9 +684,11 @@ const getLeadsByUserPagination = async (req, res) => {
       const fromDate = new Date(String(from));
       const toDate = new Date(String(to));
       if (!Number.isNaN(fromDate.getTime()) && !Number.isNaN(toDate.getTime())) {
-        where.createdAt = { gte: fromDate, lte: toDate };
+        filters.createdAt = { gte: fromDate, lte: toDate };
       }
     }
+
+    const where = { AND: [access.where, filters] };
 
     const total = await prismaClient.lead.count({ where });
 
@@ -744,10 +769,11 @@ const downloadLeadsCsv = async (req, res) => {
       );
     }
 
-    const where = { ...access.where };
+    // AND, not a spread: see getLeads.
+    const filters = {};
 
     if (search) {
-      where.OR = [
+      filters.OR = [
         { firstName: { contains: search, mode: "insensitive" } },
         { lastName: { contains: search, mode: "insensitive" } },
         { phone: { contains: search, mode: "insensitive" } },
@@ -756,7 +782,7 @@ const downloadLeadsCsv = async (req, res) => {
     }
 
     if (status && status !== "all") {
-      where.status = { equals: status, mode: "insensitive" };
+      filters.status = { equals: status, mode: "insensitive" };
     }
 
     if (campaignIds) {
@@ -765,7 +791,7 @@ const downloadLeadsCsv = async (req, res) => {
         .map((id) => String(id).trim())
         .filter(Boolean);
       if (ids.length) {
-        where.campaignId = { in: ids };
+        filters.campaignId = { in: ids };
       }
     }
 
@@ -773,9 +799,11 @@ const downloadLeadsCsv = async (req, res) => {
       const fromDate = new Date(String(from));
       const toDate = new Date(String(to));
       if (!Number.isNaN(fromDate.getTime()) && !Number.isNaN(toDate.getTime())) {
-        where.createdAt = { gte: fromDate, lte: toDate };
+        filters.createdAt = { gte: fromDate, lte: toDate };
       }
     }
+
+    const where = { AND: [access.where, filters] };
 
     const exportLimit = Math.min(
       Math.max(Number(limit) || MAX_EXPORT_LIMIT, 1),
@@ -961,4 +989,43 @@ const getPastTenDaysLeadsByUser = async (req, res) => {
   }
 };
 
-export { getLeads, addLead, getLeadsByUser, getLeadsByUserPagination, downloadLeadsCsv, getMonthlyLeadsByUser, getPastTenDaysLeadsByUser };
+/**
+ * Change a lead's status from the dashboard.
+ *
+ * Status is the only field the dashboard edits, so it is the only one accepted.
+ * This replaced PUT /api/v1/leads/update, which sat on the public router with no
+ * authentication and passed the request body straight to Prisma.
+ */
+const updateLeadStatus = async (req, res) => {
+  const { id } = req.params;
+  const status = normalizeLeadStatus(req.body?.status);
+  if (!status) {
+    return res.status(400).json({ error: "Invalid status", valid_statuses: LEAD_STATUSES });
+  }
+
+  try {
+    const scope = await resolveLeadScope(req);
+    if (!scope.ok) {
+      return res.status(scope.status).json({ error: scope.error });
+    }
+
+    const lead = await findInScope(prismaClient.lead, scope, id, { id: true });
+    if (!lead) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
+
+    const updated = await prismaClient.lead.update({
+      where: { id: lead.id },
+      data: { status },
+      select: { id: true, status: true, updatedAt: true },
+    });
+
+    req.log.info({ evt: "lead_update", leadId: id, status }, "lead status updated");
+    return res.status(200).json({ success: true, data: updated });
+  } catch (err) {
+    req.log.error({ evt: "lead_update", leadId: id, err }, "lead status update failed");
+    return res.status(500).json({ error: "Failed to update lead" });
+  }
+};
+
+export { getLeads, addLead, updateLeadStatus, getLeadsByUser, getLeadsByUserPagination, downloadLeadsCsv, getMonthlyLeadsByUser, getPastTenDaysLeadsByUser };

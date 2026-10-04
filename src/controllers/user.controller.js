@@ -1,5 +1,5 @@
 import prismaClient from "../utils/prismaClient.js";
-import { generateKey } from "../utils/generate-key.js";
+import { isUsableApiKey, rotateApiKey, visibleApiKey } from "../lib/api-keys.js";
 import { DEFAULT_ROLE } from "../lib/org-roles.js";
 
 const userSelect = {
@@ -16,10 +16,6 @@ const userSelect = {
   organizationId: true,
 };
 
-const userApiKeySelect = {
-  id: true,
-  apiKey: true,
-};
 const addUser = async (req, res) => {
   // Registration is owned by Better Auth (`POST /api/auth/sign-up/email`) and
   // by the organization plugin's invitation flow. This handler used to create
@@ -42,38 +38,46 @@ const getAllUsers = async (req, res) => {
   }
 };
 
+/**
+ * Issues a key for the caller when they have none.
+ *
+ * Owners and admins only. A publisher's key is issued and rotated by an admin
+ * (member-access.controller.js); advertisers and managers hold none.
+ */
 const addUserAPI = async (req, res) => {
   const { userId } = req.auth;
   try {
     const user = await prismaClient.user.findUnique({
-      where: {
-        id: userId,
+      where: { id: userId },
+      select: {
+        apiKey: true,
+        organizationMemberships: { select: { role: true }, take: 1 },
+        ownedOrganization: { select: { id: true } },
       },
-      select: userApiKeySelect,
     });
     if (!user) {
       return res.status(400).json({ error: "User not found" });
     }
 
-    if (user.apiKey) {
+    const role = user.ownedOrganization
+      ? "owner"
+      : user.organizationMemberships?.[0]?.role;
+    if (role !== "owner" && role !== "admin") {
+      return res
+        .status(403)
+        .json({ error: "API keys are issued by your organization's admin" });
+    }
+    if (isUsableApiKey(user.apiKey)) {
       return res.status(400).json({ error: "API key already exists" });
     }
 
-    const updatedUser = await prismaClient.user.update({
-      where: {
-        id: userId,
-      },
-      data: {
-        apiKey: generateKey(),
-      },
-      select: userApiKeySelect,
-    });
-    return res.status(200).json({ apiKey: updatedUser.apiKey });
+    const apiKey = await rotateApiKey(userId);
+    return res.status(200).json({ apiKey });
   } catch (error) {
-    console.log(error);
-    return res.status(500).json({ error: error });
+    req.log.error({ err: error }, "failed to issue API key");
+    return res.status(500).json({ error: "Failed to issue API key" });
   }
-};
+}
 
 const getUserAPI = async (req, res) => {
   const { userId } = req.auth;
@@ -84,8 +88,9 @@ const getUserAPI = async (req, res) => {
       },
       select: userSelect,
     });
-    console.log(user);
-    return res.status(200).json({ data: user });
+    return res.status(200).json({
+      data: user ? { ...user, apiKey: visibleApiKey(user.apiKey) } : user,
+    });
   } catch (error) {
     console.error("Error in getUserAPI:", error);
     return res
@@ -124,7 +129,9 @@ const getUser = async (req, res) => {
     // this relation must not turn into a 500 out of a role lookup.
     const role = organizationMemberships?.[0]?.role ?? DEFAULT_ROLE;
 
-    return res.status(200).json({ data: { ...userData, role } });
+    return res.status(200).json({
+      data: { ...userData, apiKey: visibleApiKey(userData.apiKey), role },
+    });
   } catch (error) {
     console.error("Error in getUser:", error);
     return res

@@ -1,4 +1,7 @@
 import prismaClient from "./prismaClient.js";
+import logger from "./logger.js";
+import { isUsableApiKey } from "../lib/api-keys.js";
+import { isKeyRole } from "../lib/org-roles.js";
 
 const resolveApiKeyPrincipal = async (apiKey, timer) => {
   if (!apiKey || typeof apiKey !== "string") {
@@ -7,6 +10,11 @@ const resolveApiKeyPrincipal = async (apiKey, timer) => {
 
   const normalizedApiKey = apiKey.trim();
   if (!normalizedApiKey) {
+    return null;
+  }
+  // Placeholders fill User.apiKey for users who hold no key; they are never a
+  // credential, even if one leaked.
+  if (!isUsableApiKey(normalizedApiKey)) {
     return null;
   }
 
@@ -22,6 +30,9 @@ const resolveApiKeyPrincipal = async (apiKey, timer) => {
       organizationId: true,
       // Moved off WebmasterProfile. Disables a member's key without deleting them.
       isActive: true,
+      // One organization per user, so this is at most one row; the role on it
+      // decides whether the key may be used at all.
+      organizationMemberships: { select: { organizationId: true, role: true } },
       userPlan: {
         select: {
           dailyLeadsLimit: true,
@@ -44,6 +55,26 @@ const resolveApiKeyPrincipal = async (apiKey, timer) => {
   timer?.timeEnd("db:user.findUnique(apiKey+org owner)");
 
   if (!user) {
+    return null;
+  }
+
+  // Only owners, admins and publishers send leads. Anyone else still holding a
+  // key — an advertiser or manager from before roles decided this — is refused
+  // as if the key did not exist.
+  //
+  // A key with no organization is let through: callers refuse it with "API key
+  // must belong to an organization", which says more than "invalid key".
+  const isOrgOwner = !!user.organizationId && user.organization?.ownerId === user.id;
+  const role = isOrgOwner
+    ? "owner"
+    : user.organizationMemberships?.find(
+        (m) => m.organizationId === user.organizationId,
+      )?.role ?? null;
+  if (user.organizationId && !isOrgOwner && !isKeyRole(role)) {
+    logger.info(
+      { evt: "api_key_role_denied", userId: user.id, role },
+      "API key refused: role may not hold a key",
+    );
     return null;
   }
 
@@ -75,6 +106,7 @@ const resolveApiKeyPrincipal = async (apiKey, timer) => {
     planUser,
     organizationId: user.organizationId || null,
     isActive: user.isActive,
+    role,
   };
 };
 

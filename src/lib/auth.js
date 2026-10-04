@@ -17,7 +17,7 @@ import {
 import { DEFAULT_ROLE } from "./org-roles.js";
 import { ac, PLUGIN_ROLES, ASSIGNABLE_ROLES } from "./org-access-control.js";
 import { DEFAULT_ORG_ROLES } from "../utils/default-org-roles.js";
-import { generateKey } from "../utils/generate-key.js";
+import { placeholderApiKey } from "./api-keys.js";
 import { upsertMembership } from "./membership.js";
 import { assertMemberAuthAllowed, getMemberAuthPolicy } from "./member-auth-policy.js";
 
@@ -226,8 +226,9 @@ export const auth = betterAuth({
               // sets it, so without this every account it creates would take
               // the literal default "0" — the first signup succeeds and the
               // second dies on the unique index, reported only as the generic
-              // "Failed to create user".
-              ...(user.apiKey ? {} : { apiKey: generateKey() }),
+              // "Failed to create user". A placeholder, not a key: the key is
+              // issued with a role that may hold one (src/lib/api-keys.js).
+              ...(user.apiKey ? {} : { apiKey: placeholderApiKey() }),
             },
           };
         },

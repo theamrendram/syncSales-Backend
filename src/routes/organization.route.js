@@ -4,6 +4,7 @@ import multer from "multer";
 import path from "path";
 const router = express.Router();
 
+import { getMemberAccess, setMemberAccess, getMemberApiKey, rotateMemberApiKey, revokeMemberApiKey } from "../controllers/member-access.controller.js";
 import { createOrganization, getUserOrganizations, getOrganization, updateOrganization, getMembers, addMember, removeMember, updateMemberAuthSettings, getCurrentOrganization, updateMemberRole } from "../controllers/organization.controller.js";
 
 const storage = multer.diskStorage({
@@ -44,5 +45,12 @@ router.get("/:organizationId/members", requireOrgPermission("member:manage"), ge
 router.patch("/:organizationId/members/:memberId", requireOrgPermission("member:manage"), updateMemberRole);
 router.post("/:organizationId/members", requireOrgPermission("member:manage"), addMember);
 router.delete("/:organizationId/members/:memberId", requireOrgPermission("member:manage"), removeMember);
+
+// What an advertiser or publisher sees, and publisher API keys.
+router.get("/:organizationId/members/:memberId/access", requireOrgPermission("member:manage"), getMemberAccess);
+router.put("/:organizationId/members/:memberId/access", requireOrgPermission("member:manage"), setMemberAccess);
+router.get("/:organizationId/members/:memberId/api-key", requireOrgPermission("apikey:manage"), getMemberApiKey);
+router.post("/:organizationId/members/:memberId/api-key", requireOrgPermission("apikey:manage"), rotateMemberApiKey);
+router.delete("/:organizationId/members/:memberId/api-key", requireOrgPermission("apikey:manage"), revokeMemberApiKey);
 
 export default router;

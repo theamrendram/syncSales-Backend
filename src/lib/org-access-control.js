@@ -6,7 +6,7 @@
  * guards still goes through requireOrgPermission() and src/lib/org-roles.js.
  * The grants here mirror that file so the two never disagree: owner manages the
  * organization and its members, admin manages members (member:manage), and
- * manager/viewer manage nothing.
+ * manager/advertiser/publisher manage nothing.
  *
  * The plugin used to be given ORG_ROLES, a plain array. It expects a map of
  * role name to access-control role, so it found no role at all — every invite
@@ -26,8 +26,9 @@ export const PLUGIN_ROLES = {
   owner: ac.newRole({ organization: ["update", "delete"], ...manageMembers }),
   admin: ac.newRole(manageMembers),
   manager: ac.newRole({}),
-  viewer: ac.newRole({}),
+  advertiser: ac.newRole({}),
+  publisher: ac.newRole({}),
 };
 
 /** Roles a member can be invited as, or moved to. Ownership is never handed out this way. */
-export const ASSIGNABLE_ROLES = ["admin", "manager", "viewer"];
+export const ASSIGNABLE_ROLES = ["admin", "manager", "advertiser", "publisher"];

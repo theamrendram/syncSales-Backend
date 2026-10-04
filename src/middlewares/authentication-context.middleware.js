@@ -1,7 +1,12 @@
 import { validate as uuidValidate } from "uuid";
 import prisma from "../utils/prismaClient.js";
 import logger from "../utils/logger.js";
-import { PERMISSIONS, toPermissionList } from "../lib/org-roles.js";
+import {
+  PERMISSIONS,
+  isKnownRole,
+  permissionsForRole,
+  toPermissionList,
+} from "../lib/org-roles.js";
 
 /** An owner is never locked out by missing or malformed role data. */
 const OWNER_FALLBACK_PERMISSIONS = [...PERMISSIONS];
@@ -110,7 +115,16 @@ async function buildAuthContextForOrg(userId, organizationId) {
   // WebmasterProfile used to override them here, which meant a member's effective
   // permissions did not match the role their membership claimed. It now affects
   // only which rows they see, which is a later stage.
-  if (role?.permissions) {
+  //
+  // Built-in roles read their permissions from code, not from the Role row.
+  // The roles are frozen (role.controller.js refuses edits), so the row is only
+  // a copy — and a copy that goes stale every time a permission is added: an
+  // owner was refused apikey:manage until a script rewrote every row, and a
+  // brand-new role had no row at all. The row is consulted only for a name the
+  // code does not know.
+  if (isKnownRole(membership?.role)) {
+    permissions = permissionsForRole(membership.role);
+  } else if (role?.permissions) {
     permissions = normalizePermissions(role.permissions);
   }
 

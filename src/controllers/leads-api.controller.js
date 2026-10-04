@@ -286,59 +286,42 @@ const getPrincipalWithCampaign = async (
     return null;
   }
 
-  // A member with explicit grants (campaign or route, as hasResourceGrants
-  // counts them) resolves the campaign through their campaign grants; a member
-  // without resolves it through the campaigns they own. The owned campaign, the
-  // granted campaign and the grant counts all come back in one joined query, so
-  // deciding which applies costs no extra round trip.
+  // Owners and admins post to any campaign in their organization. A publisher
+  // posts only to campaigns granted to them — always, with or without grants,
+  // so a publisher nobody has assigned yet cannot post anywhere.
   const organizationId = principal.organizationId;
-
-  timer?.time("db:user.findUnique(campaign+grants)");
-  const userWithCampaign = await prismaClient.user.findUnique({
-    relationLoadStrategy: "join",
-    where: { id: principal.actorUserId },
-    select: {
-      id: true,
-      ownedCampaigns: {
-        where: { campId },
-        select: LEAD_CAMPAIGN_SELECT,
-      },
-      ...(organizationId && {
-        campaignGrants: {
-          where: { campaign: { campId, organizationId } },
-          take: 1,
-          select: { campaign: { select: LEAD_CAMPAIGN_SELECT } },
-        },
-        _count: {
-          select: {
-            campaignGrants: { where: { campaign: { organizationId } } },
-            resourceAccess: { where: { organizationId } },
-          },
-        },
-      }),
-    },
-  });
-  timer?.timeEnd("db:user.findUnique(campaign+grants)");
-
-  if (!userWithCampaign) {
-    return null;
+  if (!organizationId) {
+    return { ...principal, id: principal.actorUserId, usageUserId: principal.planUserId, campaigns: [] };
   }
 
-  const narrowed =
-    !!organizationId &&
-    (userWithCampaign._count.campaignGrants > 0 ||
-      userWithCampaign._count.resourceAccess > 0);
-
-  const grantedCampaign = userWithCampaign.campaignGrants?.[0]?.campaign;
-  const campaigns = narrowed
-    ? grantedCampaign
-      ? [grantedCampaign]
-      : []
-    : userWithCampaign.ownedCampaigns ?? [];
+  let campaigns;
+  if (principal.role === "publisher") {
+    timer?.time("db:campaignWebmaster.findFirst(grant)");
+    const grant = await prismaClient.campaignWebmaster.findFirst({
+      where: {
+        userId: principal.actorUserId,
+        campaign: { campId, organizationId },
+      },
+      select: { campaign: { select: LEAD_CAMPAIGN_SELECT } },
+    });
+    timer?.timeEnd("db:campaignWebmaster.findFirst(grant)");
+    campaigns = grant ? [grant.campaign] : [];
+  } else {
+    timer?.time("db:campaign.findFirst(org)");
+    const campaign = await prismaClient.campaign.findFirst({
+      where: { campId, organizationId },
+      // Oldest first: campId is not unique per organization, and this is the
+      // one the owner's key resolved before keys became organization-wide.
+      orderBy: { createdAt: "asc" },
+      select: LEAD_CAMPAIGN_SELECT,
+    });
+    timer?.timeEnd("db:campaign.findFirst(org)");
+    campaigns = campaign ? [campaign] : [];
+  }
 
   return {
     ...principal,
-    id: userWithCampaign.id,
+    id: principal.actorUserId,
     usageUserId: principal.planUserId,
     campaigns,
   };
@@ -613,35 +596,4 @@ const addLeadGet = async (req, res) => {
   return processLeadRequest(req, res, "query");
 };
 
-const updateLead = async (req, res) => {
-  const { id, data } = req.body;
-
-  // Field names only; the values are the lead's own contact details.
-  req.log?.info(
-    { evt: "lead_update", leadId: id, fields: data ? Object.keys(data) : [] },
-    "lead_update:received",
-  );
-  if (!id || !data) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
-
-  try {
-    const updatedLead = await prismaClient.lead.update({
-      where: { id },
-      data,
-    });
-
-    return res.status(200).json({ success: true, lead: updatedLead });
-  } catch (error) {
-    if (error.code === "P2025") {
-      return res.status(404).json({ error: "Lead not found" });
-    }
-    (req.log || logger).error(
-      { evt: "lead_update", leadId: id, err: error },
-      "lead_update:failed",
-    );
-    return res.status(500).json({ error: "Failed to update lead." });
-  }
-};
-
-export { addLead, addLeadGet, updateLead };
+export { addLead, addLeadGet };

@@ -10,6 +10,11 @@
  * any grant sees only what was granted. That is the whole of what "webmaster"
  * used to mean, without a separate account type to carry it.
  *
+ * Advertisers and publishers (NARROWED_ROLES) are always narrowed: with no
+ * grants they see nothing rather than everything, so inviting one cannot expose
+ * the organization before anyone has assigned them a campaign. A publisher is
+ * narrowed further, to the leads they sent (`Lead.userId`, the key owner).
+ *
  * It returns a fragment rather than a boolean on purpose. A boolean has to be
  * turned into a query by whoever asked, and every one of those is a place to get
  * it wrong — before this existed, four controllers each rebuilt the same
@@ -32,6 +37,7 @@
  * authorization one, and mixing the two would mean a caller could not be shown a
  * deleted row they are entitled to see.
  */
+import { isNarrowedRole } from "../lib/org-roles.js";
 import {
   getGrantedCampaignIds,
   getGrantedRouteIds,
@@ -47,7 +53,7 @@ const deny = (status, error) => ({ ok: false, status, error });
  * Lead rows are reachable two ways — by campaign or by an explicitly granted
  * route — so a webmaster's scope is a union rather than a single id list.
  */
-async function leadScope(userId, organizationId) {
+async function leadScope(userId, organizationId, role) {
   const { campaignIds, routeIds } = await getGrantedLeadScope(
     userId,
     organizationId,
@@ -63,6 +69,9 @@ async function leadScope(userId, organizationId) {
     organizationId,
     where: {
       organizationId,
+      // Publishers see only what they sent, even on a campaign other
+      // publishers also post to.
+      ...(role === "publisher" ? { userId } : {}),
       OR: [
         ...(campaignIds.length ? [{ campaignId: { in: campaignIds } }] : []),
         ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
@@ -92,19 +101,37 @@ export async function resolveScope(req, resource) {
   const ctx = req.authContext;
 
   if (!userId) return deny(400, "User ID not found");
+
+  const organizationId = ctx?.organizationId;
+  if (!organizationId) return deny(403, "Unauthorized");
+
+  // An owner without a membership row has no role here, which is the
+  // un-narrowed case — correct, since they own the organization.
+  return scopeFor({
+    userId,
+    organizationId,
+    role: ctx.membership?.role ?? null,
+    resource,
+  });
+}
+
+/**
+ * The same answer as resolveScope, for callers that have the pieces but no
+ * request — the lead list helpers in leads.controller.js.
+ */
+export async function scopeFor({ userId, organizationId, role, resource }) {
   if (!SCOPED_RESOURCES.includes(resource)) {
     // A typo in a route definition must not silently widen access, so an unknown
     // resource refuses rather than falling through to the organization scope.
     throw new Error(`No scope defined for resource "${resource}"`);
   }
+  if (!userId || !organizationId) return deny(403, "Unauthorized");
 
-  const organizationId = ctx?.organizationId;
-  if (!organizationId) return deny(403, "Unauthorized");
-
-  // A member is narrowed only if something was explicitly granted to them. This
-  // replaces the old WebmasterProfile check: there is no separate kind of account
-  // any more, just members who have grants and members who do not.
-  if (!(await hasResourceGrants(userId, organizationId))) {
+  // Narrowed by role, or by having been granted anything at all. The second
+  // keeps the pre-role behaviour for a manager someone chose to restrict.
+  const narrowed =
+    isNarrowedRole(role) || (await hasResourceGrants(userId, organizationId));
+  if (!narrowed) {
     return {
       ok: true,
       empty: false,
@@ -115,7 +142,7 @@ export async function resolveScope(req, resource) {
 
   switch (resource) {
     case "lead":
-      return leadScope(userId, organizationId);
+      return leadScope(userId, organizationId, role);
     case "campaign":
       return idScope(
         organizationId,
