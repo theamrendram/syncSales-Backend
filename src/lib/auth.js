@@ -14,16 +14,22 @@ import {
   resetPasswordTemplate,
   organizationInviteTemplate,
 } from "./email/templates.js";
-import { DEFAULT_ROLE } from "./org-roles.js";
+import { DEFAULT_ROLE, isNarrowedRole } from "./org-roles.js";
+import {
+  parseGrants,
+  hasAnyGrant,
+  grantsBelongToOrg,
+  grantsStillInOrg,
+  replaceGrants,
+} from "./member-grants.js";
 import { ac, PLUGIN_ROLES, ASSIGNABLE_ROLES } from "./org-access-control.js";
 import { DEFAULT_ORG_ROLES } from "../utils/default-org-roles.js";
-import { placeholderApiKey } from "./api-keys.js";
 import { upsertMembership } from "./membership.js";
 import { assertMemberAuthAllowed, getMemberAuthPolicy } from "./member-auth-policy.js";
 
-const APP_URL = process.env.APP_URL || "http://localhost:3000";
-const CRM_URL = process.env.CRM_URL || "http://localhost:3001";
-const BASE_URL = process.env.BETTER_AUTH_URL || "http://localhost:8000";
+const APP_URL = process.env.NODE_ENV === "production" ? process.env.APP_URL : "http://localhost:3000";
+const CRM_URL = process.env.NODE_ENV === "production" ? process.env.CRM_URL : "http://localhost:3001";
+const BASE_URL = process.env.NODE_ENV === "production" ? process.env.BETTER_AUTH_URL : "http://localhost:8000";
 
 /**
  * Who may impersonate another user.
@@ -33,7 +39,7 @@ const BASE_URL = process.env.BETTER_AUTH_URL || "http://localhost:8000";
  * grantable by a single UPDATE on a row — a database write should not be able
  * to escalate anyone to it. Empty by default: no list, no impersonation.
  */
-const ADMIN_USER_IDS = (process.env.ADMIN_USER_IDS || "")
+const ADMIN_USER_IDS = (process.env.NODE_ENV === "production" ? process.env.ADMIN_USER_IDS : "")
   .split(",")
   .map((id) => id.trim())
   .filter(Boolean);
@@ -49,7 +55,7 @@ const ADMIN_USER_IDS = (process.env.ADMIN_USER_IDS || "")
  * Emails survive a reseed. Checking both means a stale entry in either list
  * denies rather than grants.
  */
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
+const ADMIN_EMAILS = (process.env.NODE_ENV === "production" ? process.env.ADMIN_EMAILS : "")
   .split(",")
   .map((e) => e.trim().toLowerCase())
   .filter(Boolean);
@@ -59,7 +65,7 @@ const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
  * the marketing site also authenticates the CRM. Left unset in development,
  * where the apps are localhost ports and a domain attribute would break them.
  */
-const COOKIE_DOMAIN = process.env.AUTH_COOKIE_DOMAIN || null;
+const COOKIE_DOMAIN = process.env.NODE_ENV === "production" ? process.env.AUTH_COOKIE_DOMAIN : null;
 
 /**
  * Better Auth builds action links against this API's own origin, and a
@@ -222,13 +228,6 @@ export const auth = betterAuth({
                   firstName: parts[0] || "",
                   lastName: parts.slice(1).join(" ") || "",
                 }),
-              // User.apiKey is `@unique @default("0")` and Better Auth never
-              // sets it, so without this every account it creates would take
-              // the literal default "0" — the first signup succeeds and the
-              // second dies on the unique index, reported only as the generic
-              // "Failed to create user". A placeholder, not a key: the key is
-              // issued with a role that may hold one (src/lib/api-keys.js).
-              ...(user.apiKey ? {} : { apiKey: placeholderApiKey() }),
             },
           };
         },
@@ -254,6 +253,14 @@ export const auth = betterAuth({
           // SCHEMA_MISMATCH, which 401s every authenticated request.
           modelName: "organizationMember",
           fields: { createdAt: "joinedAt" },
+        },
+        // The campaigns and routes an advertiser or publisher gets on accepting.
+        // Validated in beforeCreateInvitation, applied in afterAcceptInvitation.
+        invitation: {
+          additionalFields: {
+            campaignIds: { type: "string[]", required: false, input: true, defaultValue: [] },
+            routeIds: { type: "string[]", required: false, input: true, defaultValue: [] },
+          },
         },
         organization: {
           // Same stripping rule as User.additionalFields above: without this
@@ -330,6 +337,10 @@ export const auth = betterAuth({
 
         // The plugin only refuses "owner" when the inviter is not one. Ownership
         // carries billing and is never handed out by invitation, whoever asks.
+        //
+        // An advertiser or publisher sees nothing and sends nothing until access
+        // is assigned, so they are only invited together with some. Any other
+        // role sees the whole organization and carries no ids.
         beforeCreateInvitation: async ({ invitation }) => {
           const roles = String(invitation.role || "").split(",").map((r) => r.trim());
           if (!roles.length || roles.some((r) => !ASSIGNABLE_ROLES.includes(r))) {
@@ -338,6 +349,27 @@ export const auth = betterAuth({
               message: `Role must be one of: ${ASSIGNABLE_ROLES.join(", ")}`,
             });
           }
+
+          if (!roles.some(isNarrowedRole)) {
+            return { data: { ...invitation, campaignIds: [], routeIds: [] } };
+          }
+          const grants = parseGrants({
+            campaignIds: invitation.campaignIds ?? [],
+            routeIds: invitation.routeIds ?? [],
+          });
+          if (!grants || !hasAnyGrant(grants)) {
+            throw new APIError("BAD_REQUEST", {
+              code: "INVITATION_ACCESS_REQUIRED",
+              message: "Assign at least one campaign or route",
+            });
+          }
+          if (!(await grantsBelongToOrg(invitation.organizationId, grants))) {
+            throw new APIError("BAD_REQUEST", {
+              code: "INVITATION_ACCESS_INVALID",
+              message: "Some campaigns or routes do not belong to this organization",
+            });
+          }
+          return { data: { ...invitation, ...grants } };
         },
 
         // One organization per user is assumed downstream: /api/v1/user reads
@@ -364,13 +396,23 @@ export const auth = betterAuth({
 
         // The plugin writes the member row; the shared helper also fills
         // User.organizationId, which the API-key path reads.
-        afterAcceptInvitation: async ({ member, user, organization }) => {
+        // The access chosen at invite time is applied here, limited to what
+        // still exists: a campaign or route may be deleted while the invitation
+        // is pending.
+        afterAcceptInvitation: async ({ invitation, member, user, organization }) => {
           try {
             await upsertMembership({
               userId: user.id,
               organizationId: organization.id,
               role: member.role,
             });
+            if (isNarrowedRole(member.role)) {
+              const grants = await grantsStillInOrg(organization.id, {
+                campaignIds: invitation.campaignIds ?? [],
+                routeIds: invitation.routeIds ?? [],
+              });
+              await replaceGrants({ userId: user.id, organizationId: organization.id, ...grants });
+            }
           } catch (err) {
             logger.error(
               { err, organizationId: organization.id, userId: user.id },

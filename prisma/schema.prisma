@@ -25,7 +25,9 @@ model User {
   name                    String?
   emailVerified           Boolean              @default(false)
   image                   String?
-  apiKey                  String               @unique @default("0")
+  // NULL for anyone who holds no key. Only the org owner, advertisers and
+  // publishers hold one (src/lib/api-keys.js); NULLs don't collide on the index.
+  apiKey                  String?              @unique
 
   // Moved off WebmasterProfile, which is gone. These are member attributes, not
   // a separate kind of account: isActive disables a member's API key without
@@ -457,6 +459,10 @@ model Invitation {
   email          String
   role           String   @default("advertiser")
   status         String   @default("pending")
+  // Access an advertiser or publisher gets when the invitation is accepted.
+  // Applied by afterAcceptInvitation in src/lib/auth.js; empty for other roles.
+  campaignIds    String[] @default([])
+  routeIds       String[] @default([])
   expiresAt      DateTime
   inviterId      String
   createdAt      DateTime @default(now())

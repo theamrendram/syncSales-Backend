@@ -12,8 +12,8 @@ const resolveApiKeyPrincipal = async (apiKey, timer) => {
   if (!normalizedApiKey) {
     return null;
   }
-  // Placeholders fill User.apiKey for users who hold no key; they are never a
-  // credential, even if one leaked.
+  // Legacy placeholders ("0", "nokey_…") are never a credential, even if one
+  // leaked.
   if (!isUsableApiKey(normalizedApiKey)) {
     return null;
   }
@@ -58,9 +58,9 @@ const resolveApiKeyPrincipal = async (apiKey, timer) => {
     return null;
   }
 
-  // Only owners, admins and publishers send leads. Anyone else still holding a
-  // key — an advertiser or manager from before roles decided this — is refused
-  // as if the key did not exist.
+  // Only the owner, advertisers and publishers hold keys. Anyone else still
+  // holding one — an admin or manager from before roles decided this — is
+  // refused as if the key did not exist.
   //
   // A key with no organization is let through: callers refuse it with "API key
   // must belong to an organization", which says more than "invalid key".

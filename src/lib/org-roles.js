@@ -45,7 +45,7 @@ export const RESOURCES = [
 export const DATA_RESOURCES = ["lead", "campaign", "route"];
 // Adding, editing and removing webmasters is member management, so it needs no
 // resource of its own — `member:manage` covers it.
-// `apikey:manage` issues, rotates and revokes publisher keys.
+// `apikey:manage` issues, rotates and revokes advertiser and publisher keys.
 export const ADMIN_RESOURCES = ["organization", "member", "role", "billing", "apikey"];
 
 export const READ = "read";
@@ -75,15 +75,22 @@ export const DEFAULT_ROLE = "advertiser";
  */
 export const NARROWED_ROLES = ["advertiser", "publisher"];
 
-/** Roles that may hold an API key, i.e. send leads and call the postback. */
-export const KEY_ROLES = ["owner", "admin", "publisher"];
+/**
+ * Roles that may hold an API key, i.e. send leads and call the postback.
+ *
+ * The owner's key reaches the whole organization. An advertiser's or
+ * publisher's reaches only what was assigned to them: a publisher sends leads,
+ * an advertiser may wire their own CRM to the same endpoints. Admins and
+ * managers work in the dashboard and hold no key.
+ */
+export const KEY_ROLES = ["owner", "advertiser", "publisher"];
 
 export const ROLE_DESCRIPTIONS = {
   owner: "Full access to all features",
   admin: "Administrative access",
   manager: "Manager access",
-  advertiser: "Sees and updates leads for assigned campaigns",
-  publisher: "Sends leads; sees only the leads they sent",
+  advertiser: "Sees and updates leads for assigned campaigns; may integrate by API key",
+  publisher: "Sends leads by API key; sees only the leads they sent",
 };
 
 export const isNarrowedRole = (role) => NARROWED_ROLES.includes(role);
@@ -93,7 +100,7 @@ export const ROLE_PERMISSIONS = {
   // Everything, including the administrative resources.
   owner: [...PERMISSIONS],
 
-  // All data, and may manage members and their API keys — but cannot change the
+  // All data, and may manage members and their API keys (though holds none) — but cannot change the
   // organization itself, redefine roles, or touch billing.
   admin: [
     "member:manage",

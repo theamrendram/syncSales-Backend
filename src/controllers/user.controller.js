@@ -41,8 +41,9 @@ const getAllUsers = async (req, res) => {
 /**
  * Issues a key for the caller when they have none.
  *
- * Owners and admins only. A publisher's key is issued and rotated by an admin
- * (member-access.controller.js); advertisers and managers hold none.
+ * The owner only. Advertiser and publisher keys are issued with their role and
+ * rotated by the owner or an admin (member-access.controller.js); admins and
+ * managers hold none.
  */
 const addUserAPI = async (req, res) => {
   const { userId } = req.auth;
@@ -62,7 +63,7 @@ const addUserAPI = async (req, res) => {
     const role = user.ownedOrganization
       ? "owner"
       : user.organizationMemberships?.[0]?.role;
-    if (role !== "owner" && role !== "admin") {
+    if (role !== "owner") {
       return res
         .status(403)
         .json({ error: "API keys are issued by your organization's admin" });

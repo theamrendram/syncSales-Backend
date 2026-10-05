@@ -286,16 +286,18 @@ const getPrincipalWithCampaign = async (
     return null;
   }
 
-  // Owners and admins post to any campaign in their organization. A publisher
-  // posts only to campaigns granted to them — always, with or without grants,
-  // so a publisher nobody has assigned yet cannot post anywhere.
+  // The owner posts to any campaign in their organization. Advertisers and
+  // publishers post only to campaigns granted to them — always, with or without
+  // grants, so a member nobody has assigned yet cannot post anywhere. Anything
+  // that is not the owner takes the granted path, so an unexpected role fails
+  // closed.
   const organizationId = principal.organizationId;
   if (!organizationId) {
     return { ...principal, id: principal.actorUserId, usageUserId: principal.planUserId, campaigns: [] };
   }
 
   let campaigns;
-  if (principal.role === "publisher") {
+  if (principal.role !== "owner") {
     timer?.time("db:campaignWebmaster.findFirst(grant)");
     const grant = await prismaClient.campaignWebmaster.findFirst({
       where: {

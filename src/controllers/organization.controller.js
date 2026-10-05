@@ -3,6 +3,16 @@ import prisma from "../utils/prismaClient.js";
 import { DEFAULT_ORG_ROLES } from "../utils/default-org-roles.js";
 import { upsertMembership, removeMembership } from "../lib/membership.js";
 import { ASSIGNABLE_ROLES } from "../lib/org-access-control.js";
+import { isNarrowedRole } from "../lib/org-roles.js";
+import {
+  MAX_GRANTS,
+  parseGrants,
+  hasAnyGrant,
+  grantsBelongToOrg,
+  getMemberGrants,
+  replaceGrants,
+  GRANT_TX_OPTIONS,
+} from "../lib/member-grants.js";
 
 // Create a new organization
 const createOrganization = async (req, res) => {
@@ -264,11 +274,35 @@ const addMember = async (req, res) => {
       });
     }
 
-    await upsertMembership({
-      userId: user.id,
-      organizationId,
-      role: role.name,
-    });
+    // Same rule as role changes and invitations: an advertiser or publisher is
+    // only added together with the campaigns or routes they may see.
+    let grants = null;
+    if (isNarrowedRole(role.name)) {
+      grants = parseGrants({
+        campaignIds: req.body.campaignIds ?? [],
+        routeIds: req.body.routeIds ?? [],
+      });
+      if (!hasAnyGrant(grants)) {
+        return res.status(400).json({ error: "Assign at least one campaign or route" });
+      }
+      if (!(await grantsBelongToOrg(organizationId, grants))) {
+        return res
+          .status(400)
+          .json({ error: "Some campaigns or routes do not belong to this organization" });
+      }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await upsertMembership({
+        client: tx,
+        userId: user.id,
+        organizationId,
+        role: role.name,
+      });
+      if (grants) {
+        await replaceGrants({ client: tx, userId: user.id, organizationId, ...grants });
+      }
+    }, GRANT_TX_OPTIONS);
 
     const newMember = await prisma.organizationMember.findFirst({
       where: { userId: user.id, organizationId },
@@ -410,7 +444,16 @@ const getMembers = async (req, res) => {
   }
 };
 
-const updateMemberRoleSchema = z.object({ role: z.enum(ASSIGNABLE_ROLES) }).strict();
+const grantIds = z.array(z.string().uuid()).max(MAX_GRANTS);
+const updateMemberRoleSchema = z
+  .object({
+    role: z.enum(ASSIGNABLE_ROLES),
+    // Access to go with an advertiser or publisher role, applied in the same
+    // transaction. Omitted, the member's current access is kept.
+    campaignIds: grantIds.optional(),
+    routeIds: grantIds.optional(),
+  })
+  .strict();
 
 // Change a member's role. Ownership is never assigned here, the owner's own row
 // is fixed, and nobody changes their own role (an admin demoting themselves by
@@ -451,11 +494,37 @@ const updateMemberRole = async (req, res) => {
       return res.status(400).json({ error: "You can't change your own role" });
     }
 
-    await upsertMembership({
-      userId: member.userId,
-      organizationId,
-      role: parsed.data.role,
-    });
+    const { role } = parsed.data;
+    const sentGrants =
+      parsed.data.campaignIds || parsed.data.routeIds
+        ? {
+          campaignIds: [...new Set(parsed.data.campaignIds ?? [])],
+          routeIds: [...new Set(parsed.data.routeIds ?? [])],
+        }
+        : null;
+
+    // An advertiser or publisher with nothing assigned sees nothing and cannot
+    // send leads, so the role is only handed out together with some access —
+    // sent now, or already held (advertiser <-> publisher keeps its grants).
+    const grants = isNarrowedRole(role) ? sentGrants : null;
+    if (isNarrowedRole(role)) {
+      const effective = grants ?? (await getMemberGrants(member.userId, organizationId));
+      if (!hasAnyGrant(effective)) {
+        return res.status(400).json({ error: "Assign at least one campaign or route" });
+      }
+      if (grants && !(await grantsBelongToOrg(organizationId, grants))) {
+        return res
+          .status(400)
+          .json({ error: "Some campaigns or routes do not belong to this organization" });
+      }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (grants) {
+        await replaceGrants({ client: tx, userId: member.userId, organizationId, ...grants });
+      }
+      await upsertMembership({ client: tx, userId: member.userId, organizationId, role });
+    }, GRANT_TX_OPTIONS);
 
     req.log.info(
       { evt: "member_role_updated", organizationId, memberId, role: parsed.data.role },

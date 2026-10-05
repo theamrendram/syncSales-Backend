@@ -1,5 +1,7 @@
 import prisma from "../utils/prismaClient.js";
 import { syncApiKeyForRole } from "../lib/api-keys.js";
+import { isNarrowedRole } from "../lib/org-roles.js";
+import { getMemberGrants, hasAnyGrant } from "../lib/member-grants.js";
 
 function assertRoleRouteContext(req, organizationId) {
   return (
@@ -137,6 +139,18 @@ const updateMemberRole = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Cannot change organization owner's role",
+      });
+    }
+
+    // An advertiser or publisher must already have access assigned; this
+    // endpoint takes none, so the members screen sends the grants with the role.
+    if (
+      isNarrowedRole(newRole.name) &&
+      !hasAnyGrant(await getMemberGrants(member.userId, organizationId))
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Assign at least one campaign or route",
       });
     }
 

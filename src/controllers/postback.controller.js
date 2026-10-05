@@ -2,14 +2,32 @@ import prismaClient from "../utils/prismaClient.js";
 import { decodePublicOrgLeadId } from "../utils/org-lead-id.js";
 import { resolveApiKeyPrincipal } from "../utils/api-key-principal.js";
 import { LEAD_STATUSES, normalizeLeadStatus } from "../utils/lead-status.js";
+import { getGrantedLeadScope } from "../utils/resource-grants.js";
 
 /**
  * Status update for one lead, authenticated by API key.
  *
- * A publisher may only touch leads it sent (`Lead.userId` is the key owner).
- * Owners and admins may touch any lead in their organization. Advertisers hold
- * no key and change statuses in the dashboard instead.
+ * The owner may touch any lead in their organization. A publisher may only
+ * touch leads it sent (`Lead.userId` is the key owner). An advertiser may touch
+ * leads in the campaigns or routes assigned to it, which is what it sees in the
+ * dashboard. Nobody else holds a key (see resolveApiKeyPrincipal).
  */
+
+/** The lead filter a key's role allows, beyond its organization. */
+async function postbackScope(principal) {
+  if (principal.role === "owner") return {};
+  if (principal.role === "publisher") return { userId: principal.actorUserId };
+  if (principal.role === "advertiser") {
+    const { campaignIds, routeIds } = await getGrantedLeadScope(
+      principal.actorUserId,
+      principal.organizationId,
+    );
+    return {
+      OR: [{ campaignId: { in: campaignIds } }, { routeId: { in: routeIds } }],
+    };
+  }
+  return null;
+}
 async function addPostback(req, res) {
   const lead_id = req.query.lead_id;
   const apiKey = req.get("x-api-key");
@@ -47,16 +65,17 @@ async function addPostback(req, res) {
       });
     }
 
-    const lead = await prismaClient.lead.findFirst({
+    const scope = await postbackScope(principal);
+    const lead = scope && await prismaClient.lead.findFirst({
       where: {
         organizationId: principal.organizationId,
         orgLeadId: orgLeadIdNum,
-        ...(principal.role === "publisher" ? { userId: principal.actorUserId } : {}),
+        ...scope,
       },
       select: { id: true },
     });
 
-    // Another publisher's lead answers the same as a missing one, so the
+    // A lead outside the key's scope answers the same as a missing one, so the
     // response does not confirm which ids exist.
     if (!lead) {
       return res.status(404).json({ error: "No lead found with this id" });

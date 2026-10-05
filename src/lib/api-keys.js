@@ -1,30 +1,28 @@
 /**
  * Who holds an API key, and the one place keys are issued or withdrawn.
  *
- * Keys live on `User.apiKey`, which is `@unique @default("0")`: a column every
- * user must fill with a distinct value. A user without a key therefore carries a
- * random placeholder rather than null — unguessable, never shown, and refused by
- * isUsableApiKey() wherever a key is accepted.
+ * Keys live on `User.apiKey`, which is nullable and `@unique`: NULL means no
+ * key, and any number of users may hold NULL without colliding on the index.
  *
- * Only KEY_ROLES (owner, admin, publisher) hold a usable key. Advertisers and
- * managers never send leads, so a live credential on their account would only be
+ * Only KEY_ROLES (owner, advertiser, publisher) hold a key. Admins and managers
+ * work in the dashboard, so a live credential on their account would only be
  * one more thing to leak.
  */
-import crypto from "crypto";
 import prisma from "../utils/prismaClient.js";
 import { generateKey } from "../utils/generate-key.js";
 import { isKeyRole } from "./org-roles.js";
 
-const NO_KEY_PREFIX = "nokey_";
-
-/** A value for User.apiKey that satisfies the unique index and is never a key. */
-export function placeholderApiKey() {
-  return `${NO_KEY_PREFIX}${crypto.randomBytes(16).toString("hex")}`;
-}
-
-/** True for a real key; false for the column default and for placeholders. */
+/**
+ * True for a real key. Rows written before keys became nullable may still hold
+ * the old column default "0" or a "nokey_" placeholder; neither is a key.
+ */
 export function isUsableApiKey(key) {
-  return typeof key === "string" && key !== "0" && !key.startsWith(NO_KEY_PREFIX);
+  return (
+    typeof key === "string" &&
+    key.length > 0 &&
+    key !== "0" &&
+    !key.startsWith("nokey_")
+  );
 }
 
 /** The key as the UI should see it: the key itself, or null when there is none. */
@@ -43,7 +41,7 @@ export async function rotateApiKey(userId, client = prisma) {
 export async function revokeApiKey(userId, client = prisma) {
   await client.user.update({
     where: { id: userId },
-    data: { apiKey: placeholderApiKey() },
+    data: { apiKey: null },
   });
 }
 

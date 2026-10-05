@@ -46,7 +46,7 @@ router.patch("/:organizationId/members/:memberId", requireOrgPermission("member:
 router.post("/:organizationId/members", requireOrgPermission("member:manage"), addMember);
 router.delete("/:organizationId/members/:memberId", requireOrgPermission("member:manage"), removeMember);
 
-// What an advertiser or publisher sees, and publisher API keys.
+// What an advertiser or publisher sees, and their API keys.
 router.get("/:organizationId/members/:memberId/access", requireOrgPermission("member:manage"), getMemberAccess);
 router.put("/:organizationId/members/:memberId/access", requireOrgPermission("member:manage"), setMemberAccess);
 router.get("/:organizationId/members/:memberId/api-key", requireOrgPermission("apikey:manage"), getMemberApiKey);

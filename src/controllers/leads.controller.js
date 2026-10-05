@@ -10,6 +10,7 @@ import { resolveLeadScope } from "../utils/lead-scope.js";
 import { findInScope, scopeFor } from "../utils/scope.js";
 import { LEAD_STATUSES, normalizeLeadStatus } from "../utils/lead-status.js";
 import { isKeyRole } from "../lib/org-roles.js";
+import { isUsableApiKey } from "../lib/api-keys.js";
 import {
   getGrantedLeadScope,
   hasResourceGrants,
@@ -266,8 +267,9 @@ const addLead = async (req, res) => {
     const ip = getClientIp(req);
     const country = "IN";
 
+    // Legacy "0"/"nokey_" values are not keys and must never match a row.
     // Get user and campaign in a single query with organization context
-    const userWithCampaign = await prismaClient.user.findUnique({
+    const userWithCampaign = isUsableApiKey(apiKey) && await prismaClient.user.findUnique({
       where: { apiKey },
       select: {
         id: true,
@@ -393,7 +395,7 @@ const addLead = async (req, res) => {
       }
     }
 
-    // Only owners, admins and publishers hold usable keys. An advertiser or
+    // Only the owner, advertisers and publishers hold usable keys. An admin or
     // manager may still have a key from before roles decided this; refuse it.
     const keyRole = userWithCampaign.organizationMemberships.find(
       (membership) => membership.organizationId === campaign.organizationId,
@@ -408,6 +410,18 @@ const addLead = async (req, res) => {
         actorUserId: userWithCampaign.id,
       });
       return res.status(403).json({ error: "This API key cannot send leads" });
+    }
+
+    // Advertisers and publishers send only to campaigns assigned to them, even
+    // when they hold no grants at all; only the owner's key is organization-wide.
+    if (!isOrgOwnerKey && !userWithCampaign.campaignGrants[0]) {
+      logLeadOutcome(req, {
+        ...logFields,
+        outcome: "campaign_access_denied",
+        status: 403,
+        actorUserId: userWithCampaign.id,
+      });
+      return res.status(403).json({ error: "Access denied to this campaign" });
     }
 
     // Check for duplicate lead

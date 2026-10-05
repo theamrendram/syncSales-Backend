@@ -1,24 +1,18 @@
-import { z } from "zod";
 import prisma from "../utils/prismaClient.js";
-import { isKeyRole } from "../lib/org-roles.js";
+import { isKeyRole, isNarrowedRole } from "../lib/org-roles.js";
 import { rotateApiKey, revokeApiKey, visibleApiKey } from "../lib/api-keys.js";
+import {
+  parseGrants,
+  hasAnyGrant,
+  grantsBelongToOrg,
+  getMemberGrants,
+  replaceGrants,
+} from "../lib/member-grants.js";
 
 /**
- * What an advertiser or publisher may see, and the publisher's API key.
- *
- * Campaign grants are CampaignWebmaster rows and route grants are AccessControl
- * rows — the two tables src/utils/resource-grants.js already reads, so a grant
- * written here narrows every scoped endpoint without further wiring.
+ * What an advertiser or publisher may see, and their API key. Grants are
+ * written through src/lib/member-grants.js.
  */
-
-const MAX_GRANTS = 500;
-
-const accessSchema = z
-  .object({
-    campaignIds: z.array(z.string().uuid()).max(MAX_GRANTS),
-    routeIds: z.array(z.string().uuid()).max(MAX_GRANTS),
-  })
-  .strict();
 
 /** The member, provided they belong to the organization in the auth context. */
 async function findMember(req, res) {
@@ -52,30 +46,8 @@ const getMemberAccess = async (req, res) => {
     const member = await findMember(req, res);
     if (!member) return;
 
-    const [campaigns, routes] = await Promise.all([
-      prisma.campaignWebmaster.findMany({
-        where: { userId: member.userId, campaign: { organizationId: member.organizationId } },
-        select: { campaignId: true },
-        take: MAX_GRANTS,
-      }),
-      prisma.accessControl.findMany({
-        where: {
-          userId: member.userId,
-          organizationId: member.organizationId,
-          routeId: { not: null },
-        },
-        select: { routeId: true },
-        take: MAX_GRANTS,
-      }),
-    ]);
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        campaignIds: campaigns.map((c) => c.campaignId),
-        routeIds: routes.map((r) => r.routeId),
-      },
-    });
+    const data = await getMemberGrants(member.userId, member.organizationId);
+    return res.status(200).json({ success: true, data });
   } catch (err) {
     req.log.error({ err }, "failed to read member access");
     return res.status(500).json({ error: "Failed to read member access" });
@@ -91,47 +63,29 @@ const setMemberAccess = async (req, res) => {
       return res.status(400).json({ error: "The owner always sees everything" });
     }
 
-    const parsed = accessSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
+    const grants = parseGrants(req.body);
+    if (!grants) {
       return res
         .status(400)
         .json({ error: "campaignIds and routeIds must be lists of ids" });
     }
-    const campaignIds = [...new Set(parsed.data.campaignIds)];
-    const routeIds = [...new Set(parsed.data.routeIds)];
+    // Advertisers and publishers see nothing and send nothing without a grant,
+    // so their access can be changed but never emptied.
+    if (isNarrowedRole(member.role) && !hasAnyGrant(grants)) {
+      return res
+        .status(400)
+        .json({ error: "Assign at least one campaign or route" });
+    }
+    const { campaignIds, routeIds } = grants;
     const { organizationId, userId } = member;
 
-    // Every id must belong to this organization. Ids are client-supplied, so
-    // without this a grant could reach into another organization's campaign.
-    const [campaignCount, routeCount] = await Promise.all([
-      prisma.campaign.count({ where: { id: { in: campaignIds }, organizationId } }),
-      prisma.route.count({ where: { id: { in: routeIds }, organizationId, deletedAt: null } }),
-    ]);
-    if (campaignCount !== campaignIds.length || routeCount !== routeIds.length) {
+    if (!(await grantsBelongToOrg(organizationId, grants))) {
       return res
         .status(400)
         .json({ error: "Some campaigns or routes do not belong to this organization" });
     }
 
-    await prisma.$transaction([
-      prisma.campaignWebmaster.deleteMany({
-        where: { userId, campaign: { organizationId } },
-      }),
-      prisma.accessControl.deleteMany({
-        where: { userId, organizationId, routeId: { not: null } },
-      }),
-      prisma.campaignWebmaster.createMany({
-        data: campaignIds.map((campaignId) => ({ campaignId, userId })),
-      }),
-      prisma.accessControl.createMany({
-        data: routeIds.map((routeId) => ({
-          userId,
-          organizationId,
-          routeId,
-          accessType: "view",
-        })),
-      }),
-    ]);
+    await replaceGrants({ userId, organizationId, campaignIds, routeIds });
 
     req.log.info(
       {
@@ -151,7 +105,8 @@ const setMemberAccess = async (req, res) => {
 };
 
 /**
- * Admins manage keys for members whose role may hold one. The owner's key is
+ * The owner and admins manage keys for advertisers and publishers; admins and
+ * managers hold none (KEY_ROLES). The owner's key is
  * the owner's own business: an admin rotating it would break the owner's
  * integrations without the owner having any say.
  */
