@@ -26,6 +26,7 @@ import { ac, PLUGIN_ROLES, ASSIGNABLE_ROLES } from "./org-access-control.js";
 import { DEFAULT_ORG_ROLES } from "../utils/access/default-org-roles.js";
 import { upsertMembership } from "./membership.js";
 import { assertMemberAuthAllowed, getMemberAuthPolicy } from "./member-auth-policy.js";
+import { invitationSignup } from "./invitation-signup.js";
 import { assertSeatAvailable } from "./member-limit.js";
 
 const APP_URL = process.env.NODE_ENV === "production" ? process.env.APP_URL : "http://localhost:3000";
@@ -440,6 +441,10 @@ export const auth = betterAuth({
         await sendEmail({ to: email, subject, html });
       },
     }),
+
+    // /invitation/preview and /invitation/sign-up: the invitation link is proof
+    // of the inbox, so an invitee gets a verified account without a second email.
+    invitationSignup(),
 
     // Impersonation, the replacement for the previous provider's "sign in as
     // user". POST /api/auth/admin/impersonate-user swaps the caller's session
