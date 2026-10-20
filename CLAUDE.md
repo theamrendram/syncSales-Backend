@@ -23,7 +23,7 @@ Backend for SyncSales, a lead-management SaaS for media buyers. Express 4 + Pris
   - `access/`: row scope (`scope.js`, `lead-scope.js`), resource grants, role permissions schema, default org roles
   - `leads/`: duplicate check, statuses, public lead ids, lead outcome logging
   - `analytics/`: chart functions, lead insights
-  - `webhooks/`: outbound webhook delivery
+  - `webhooks/`: outbound webhook delivery, SSRF guard for user-supplied URLs
   - `legacy/`: unused or one-off code (`organization-utils`, `migration-helper`, `util-for-json-to-csv`). Don't import from here in new code
 - `src/lib/auth.js`: Better Auth instance (org plugin, Google OAuth, email hooks). `lib/org-roles.js`, `lib/email/`
 - `src/middlewares/`: `require-auth` (session), `authentication-context` (org context + `requireOrgPermission`), `rate-limiter`
