@@ -1,6 +1,6 @@
-import prismaClient from "../utils/prismaClient.js";
-import { generateKey } from "../utils/generate-key.js";
-import logger from "../utils/logger.js";
+import prismaClient from "../utils/core/prismaClient.js";
+import { generateKey } from "../utils/auth/generate-key.js";
+import logger from "../utils/core/logger.js";
 
 async function getSubscription(req, res) {
   const body = req.body;

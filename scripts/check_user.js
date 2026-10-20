@@ -1,4 +1,4 @@
-import prisma from "../src/utils/prismaClient.js";
+import prisma from "../src/utils/core/prismaClient.js";
 
 async function check() {
   const rahulEmail = "rahul736283s@gmail.com";

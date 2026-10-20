@@ -1,9 +1,9 @@
-import prisma from "./prismaClient.js";
+import prisma from "../core/prismaClient.js";
 import {
   ORG_ROLES,
   ROLE_DESCRIPTIONS,
   ROLE_PERMISSIONS,
-} from "../lib/org-roles.js";
+} from "../../lib/org-roles.js";
 import { parseRolePermissions } from "./role-permissions-schema.js";
 
 /**

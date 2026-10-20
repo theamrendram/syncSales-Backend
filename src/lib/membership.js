@@ -11,9 +11,9 @@
  *
  * One helper, so a new call site cannot reintroduce a variant.
  */
-import prisma from "../utils/prismaClient.js";
+import prisma from "../utils/core/prismaClient.js";
 import { DEFAULT_ROLE, isKnownRole } from "./org-roles.js";
-import { ensureDefaultRolesForOrganization } from "../utils/default-org-roles.js";
+import { ensureDefaultRolesForOrganization } from "../utils/access/default-org-roles.js";
 import { syncApiKeyForRole, revokeApiKey } from "./api-keys.js";
 
 /**

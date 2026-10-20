@@ -15,7 +15,7 @@
  *
  * These roles are frozen: role.controller.js rejects create,
  * update and delete, so the `Role` table only ever holds these rows per
- * organization. They live here, and src/utils/default-org-roles.js seeds the
+ * organization. They live here, and src/utils/access/default-org-roles.js seeds the
  * table from them rather than restating them.
  *
  * There is deliberately no "webmaster" here. A webmaster is a member whose role

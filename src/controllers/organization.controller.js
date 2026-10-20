@@ -1,6 +1,6 @@
 import { z } from "zod";
-import prisma from "../utils/prismaClient.js";
-import { DEFAULT_ORG_ROLES } from "../utils/default-org-roles.js";
+import prisma from "../utils/core/prismaClient.js";
+import { DEFAULT_ORG_ROLES } from "../utils/access/default-org-roles.js";
 import { upsertMembership, removeMembership } from "../lib/membership.js";
 import { ASSIGNABLE_ROLES } from "../lib/org-access-control.js";
 import { isNarrowedRole } from "../lib/org-roles.js";

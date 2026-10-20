@@ -25,7 +25,7 @@
  */
 import "dotenv/config";
 import { pathToFileURL } from "url";
-import prisma from "../src/utils/prismaClient.js";
+import prisma from "../src/utils/core/prismaClient.js";
 import { isKnownRole, DEFAULT_ROLE } from "../src/lib/org-roles.js";
 
 const APPLY = process.argv.includes("--apply");

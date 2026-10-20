@@ -1,6 +1,6 @@
-import prismaClient from "./prismaClient.js";
+import prismaClient from "../core/prismaClient.js";
 import { resolveApiKeyPrincipal } from "./api-key-principal.js";
-import { logLeadOutcome, fingerprintApiKey } from "./lead-log.js";
+import { logLeadOutcome, fingerprintApiKey } from "../leads/lead-log.js";
 
 const checkUserPlan = async (req, res, next) => {
   const timer = req.timer;

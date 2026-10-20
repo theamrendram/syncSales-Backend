@@ -1,12 +1,12 @@
-import prismaClient from "../utils/prismaClient.js";
+import prismaClient from "../utils/core/prismaClient.js";
 import { randomUUID } from "crypto";
-import { sendWebhook } from "../utils/sendWebhook.js";
-import { duplicateCutoff } from "../utils/check-duplicate-lead.js";
-import getClientIp from "../utils/get-client-ip.js";
-import { encodePublicOrgLeadId } from "../utils/org-lead-id.js";
-import { resolveApiKeyPrincipal } from "../utils/api-key-principal.js";
-import logger from "../utils/logger.js";
-import { logLeadOutcome, fingerprintApiKey, phoneLast4 } from "../utils/lead-log.js";
+import { sendWebhook } from "../utils/webhooks/sendWebhook.js";
+import { duplicateCutoff } from "../utils/leads/check-duplicate-lead.js";
+import getClientIp from "../utils/http/get-client-ip.js";
+import { encodePublicOrgLeadId } from "../utils/leads/org-lead-id.js";
+import { resolveApiKeyPrincipal } from "../utils/auth/api-key-principal.js";
+import logger from "../utils/core/logger.js";
+import { logLeadOutcome, fingerprintApiKey, phoneLast4 } from "../utils/leads/lead-log.js";
 
 const leadModelHasOrgLeadId =
   !!prismaClient?._runtimeDataModel?.models?.Lead?.fields?.some(

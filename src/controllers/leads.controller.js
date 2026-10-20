@@ -1,20 +1,20 @@
-import prismaClient from "../utils/prismaClient.js";
-import { sendWebhook } from "../utils/sendWebhook.js";
-import { checkDuplicateLead } from "../utils/check-duplicate-lead.js";
-import getClientIp from "../utils/get-client-ip.js";
-import { chartMetrics, generateExtendedReport, transformLeadsToChartData, getLeadsGroupedByDateRouteCampaign } from "../utils/chart-functions.js";
-import logger from "../utils/logger.js";
-import { logLeadOutcome, fingerprintApiKey, phoneLast4 } from "../utils/lead-log.js";
+import prismaClient from "../utils/core/prismaClient.js";
+import { sendWebhook } from "../utils/webhooks/sendWebhook.js";
+import { checkDuplicateLead } from "../utils/leads/check-duplicate-lead.js";
+import getClientIp from "../utils/http/get-client-ip.js";
+import { chartMetrics, generateExtendedReport, transformLeadsToChartData, getLeadsGroupedByDateRouteCampaign } from "../utils/analytics/chart-functions.js";
+import logger from "../utils/core/logger.js";
+import { logLeadOutcome, fingerprintApiKey, phoneLast4 } from "../utils/leads/lead-log.js";
 import { Parser } from "json2csv";
-import { resolveLeadScope } from "../utils/lead-scope.js";
-import { findInScope, scopeFor } from "../utils/scope.js";
-import { LEAD_STATUSES, normalizeLeadStatus } from "../utils/lead-status.js";
+import { resolveLeadScope } from "../utils/access/lead-scope.js";
+import { findInScope, scopeFor } from "../utils/access/scope.js";
+import { LEAD_STATUSES, normalizeLeadStatus } from "../utils/leads/lead-status.js";
 import { isKeyRole } from "../lib/org-roles.js";
 import { isUsableApiKey } from "../lib/api-keys.js";
 import {
   getGrantedLeadScope,
   hasResourceGrants,
-} from "../utils/resource-grants.js";
+} from "../utils/access/resource-grants.js";
 
 const MAX_PAGE_LIMIT = 100;
 const MAX_EXPORT_LIMIT = 1000;
@@ -60,7 +60,7 @@ const getUserWithMemberships = async (userId) =>
 /**
  * Lead access for the list/export endpoints that predate withScope().
  *
- * Delegates each organization to scopeFor() in src/utils/scope.js, so these
+ * Delegates each organization to scopeFor() in src/utils/access/scope.js, so these
  * endpoints narrow exactly as the scoped ones do — including advertisers and
  * publishers, who see nothing until something is assigned. With no
  * organization, it is the union of the caller's organizations, each scoped.

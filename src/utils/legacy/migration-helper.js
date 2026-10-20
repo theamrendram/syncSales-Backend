@@ -1,5 +1,5 @@
-import prisma from "./prismaClient.js";
-import { DEFAULT_ORG_ROLES } from "./default-org-roles.js";
+import prisma from "../core/prismaClient.js";
+import { DEFAULT_ORG_ROLES } from "../access/default-org-roles.js";
 
 // Migration script to set up organizations for existing users
 const migrateExistingUsersToOrganizations = async () => {

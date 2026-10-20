@@ -37,7 +37,7 @@
  * authorization one, and mixing the two would mean a caller could not be shown a
  * deleted row they are entitled to see.
  */
-import { isNarrowedRole } from "../lib/org-roles.js";
+import { isNarrowedRole } from "../../lib/org-roles.js";
 import {
   getGrantedCampaignIds,
   getGrantedRouteIds,

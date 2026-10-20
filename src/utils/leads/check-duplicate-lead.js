@@ -1,4 +1,4 @@
-import prismaClient from "../utils/prismaClient.js";
+import prismaClient from "../core/prismaClient.js";
 
 // Earliest createdAt that still counts as a duplicate, or null when the
 // campaign has no window (every earlier lead with the phone counts).

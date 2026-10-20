@@ -12,7 +12,7 @@
  */
 import { APIError } from "better-auth/api";
 
-import prisma from "../utils/prismaClient.js";
+import prisma from "../utils/core/prismaClient.js";
 
 const orgPolicySelect = {
   id: true,

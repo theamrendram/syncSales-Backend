@@ -10,7 +10,7 @@
 import { z } from "zod";
 import { fromNodeHeaders } from "better-auth/node";
 
-import prismaClient from "../utils/prismaClient.js";
+import prismaClient from "../utils/core/prismaClient.js";
 import { auth } from "../lib/auth.js";
 import { getMemberAuthPolicy } from "../lib/member-auth-policy.js";
 

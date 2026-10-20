@@ -6,7 +6,7 @@
  */
 import { fromNodeHeaders } from "better-auth/node";
 import auth from "../lib/auth.js";
-import logger from "../utils/logger.js";
+import logger from "../utils/core/logger.js";
 
 async function readSession(req) {
   return auth.api.getSession({ headers: fromNodeHeaders(req.headers) });

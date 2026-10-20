@@ -10,8 +10,8 @@
  * Mount after authenticationContext(), which supplies the organization and the
  * isWebmaster flag this reads.
  */
-import { resolveScope } from "../utils/scope.js";
-import logger from "../utils/logger.js";
+import { resolveScope } from "../utils/access/scope.js";
+import logger from "../utils/core/logger.js";
 
 export function withScope(resource) {
   return async (req, res, next) => {

@@ -1,4 +1,4 @@
-import prismaClient from "../utils/prismaClient.js";
+import prismaClient from "../core/prismaClient.js";
 import { Parser } from "json2csv";
 import fs from "fs";
 

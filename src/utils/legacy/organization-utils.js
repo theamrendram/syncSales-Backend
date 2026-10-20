@@ -1,4 +1,4 @@
-import prisma from "./prismaClient.js";
+import prisma from "../core/prismaClient.js";
 
 // Get user's organization context
 const getUserOrganizationContext = async (userId) => {

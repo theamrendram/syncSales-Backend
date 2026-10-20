@@ -1,8 +1,8 @@
-import prismaClient from "../utils/prismaClient.js";
-import logger from "../utils/logger.js";
-import { resolveLeadScope } from "../utils/lead-scope.js";
-import { AGING_BUCKETS, SUB_FIELDS, getPendingAging, getDeliveryHealth, getSubBreakdown } from "../utils/lead-insights.js";
-import { chartMetrics, generateExtendedReport, getLeadsGroupedByDateRouteCampaign } from "../utils/chart-functions.js";
+import prismaClient from "../utils/core/prismaClient.js";
+import logger from "../utils/core/logger.js";
+import { resolveLeadScope } from "../utils/access/lead-scope.js";
+import { AGING_BUCKETS, SUB_FIELDS, getPendingAging, getDeliveryHealth, getSubBreakdown } from "../utils/analytics/lead-insights.js";
+import { chartMetrics, generateExtendedReport, getLeadsGroupedByDateRouteCampaign } from "../utils/analytics/chart-functions.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

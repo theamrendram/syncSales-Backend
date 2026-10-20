@@ -2,7 +2,7 @@
  * Lead scope, kept as its own entry point for the chart, health and sub-ID
  * endpoints that already call it.
  *
- * The logic now lives in src/utils/scope.js alongside the campaign and route
+ * The logic now lives in src/utils/access/scope.js alongside the campaign and route
  * scopes, so the three cannot drift apart. This is the same contract it always
  * had; what changed is that it is one implementation rather than one of several.
  */

@@ -1,4 +1,4 @@
-import prismaClient from "../utils/prismaClient.js";
+import prismaClient from "../utils/core/prismaClient.js";
 import { requireScope } from "../middlewares/scope.middleware.js";
 
 const CAMPAIGN_MUTABLE_FIELDS = [

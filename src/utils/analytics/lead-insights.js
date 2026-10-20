@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
-import prismaClient from "./prismaClient.js";
-import logger from "./logger.js";
+import prismaClient from "../core/prismaClient.js";
+import logger from "../core/logger.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

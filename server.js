@@ -1,8 +1,8 @@
 import app from "./src/app.js";
 import { config, validateEnv } from "./src/config/env.js";
 import { verifyEmailTransport } from "./src/lib/email/index.js";
-import logger from "./src/utils/logger.js";
-import { registerProcessGuards } from "./src/utils/process-guards.js";
+import logger from "./src/utils/core/logger.js";
+import { registerProcessGuards } from "./src/utils/core/process-guards.js";
 
 validateEnv();
 registerProcessGuards();

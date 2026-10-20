@@ -7,7 +7,7 @@
  * live here.
  */
 import nodemailer from "nodemailer";
-import logger from "../../utils/logger.js";
+import logger from "../../utils/core/logger.js";
 
 let transporter = null;
 

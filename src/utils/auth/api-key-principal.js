@@ -1,7 +1,7 @@
-import prismaClient from "./prismaClient.js";
-import logger from "./logger.js";
-import { isUsableApiKey } from "../lib/api-keys.js";
-import { isKeyRole } from "../lib/org-roles.js";
+import prismaClient from "../core/prismaClient.js";
+import logger from "../core/logger.js";
+import { isUsableApiKey } from "../../lib/api-keys.js";
+import { isKeyRole } from "../../lib/org-roles.js";
 
 const resolveApiKeyPrincipal = async (apiKey, timer) => {
   if (!apiKey || typeof apiKey !== "string") {

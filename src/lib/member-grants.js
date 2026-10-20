@@ -2,7 +2,7 @@
  * Writing what an advertiser or publisher may see.
  *
  * Campaign grants are CampaignWebmaster rows and route grants are AccessControl
- * rows — the two tables src/utils/resource-grants.js reads, so a grant written
+ * rows — the two tables src/utils/access/resource-grants.js reads, so a grant written
  * here narrows every scoped endpoint without further wiring.
  *
  * Shared by the member access editor, role changes and invitations: a narrowed
@@ -10,7 +10,7 @@
  * that hands one out must assign something in the same step.
  */
 import { z } from "zod";
-import prisma from "../utils/prismaClient.js";
+import prisma from "../utils/core/prismaClient.js";
 
 export const MAX_GRANTS = 500;
 

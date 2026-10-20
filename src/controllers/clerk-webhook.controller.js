@@ -1,6 +1,6 @@
-import prisma from "../utils/prismaClient.js";
+import prisma from "../utils/core/prismaClient.js";
 import { Webhook } from "svix";
-import logger from "../utils/logger.js";
+import logger from "../utils/core/logger.js";
 
 // Handle Clerk webhook events
 const handleClerkWebhook = async (req, res) => {

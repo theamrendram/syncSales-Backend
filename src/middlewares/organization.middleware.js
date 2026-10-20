@@ -1,4 +1,4 @@
-import prisma from "../utils/prismaClient.js";
+import prisma from "../utils/core/prismaClient.js";
 
 // Middleware to check if user is member of organization
 const requireOrganizationMembership = async (req, res, next) => {

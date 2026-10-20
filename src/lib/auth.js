@@ -6,8 +6,8 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { admin, organization } from "better-auth/plugins";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 
-import prisma from "../utils/prismaClient.js";
-import logger from "../utils/logger.js";
+import prisma from "../utils/core/prismaClient.js";
+import logger from "../utils/core/logger.js";
 import { sendEmail } from "./email/index.js";
 import {
   verifyEmailTemplate,
@@ -23,7 +23,7 @@ import {
   replaceGrants,
 } from "./member-grants.js";
 import { ac, PLUGIN_ROLES, ASSIGNABLE_ROLES } from "./org-access-control.js";
-import { DEFAULT_ORG_ROLES } from "../utils/default-org-roles.js";
+import { DEFAULT_ORG_ROLES } from "../utils/access/default-org-roles.js";
 import { upsertMembership } from "./membership.js";
 import { assertMemberAuthAllowed, getMemberAuthPolicy } from "./member-auth-policy.js";
 

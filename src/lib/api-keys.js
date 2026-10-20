@@ -8,8 +8,8 @@
  * work in the dashboard, so a live credential on their account would only be
  * one more thing to leak.
  */
-import prisma from "../utils/prismaClient.js";
-import { generateKey } from "../utils/generate-key.js";
+import prisma from "../utils/core/prismaClient.js";
+import { generateKey } from "../utils/auth/generate-key.js";
 import { isKeyRole } from "./org-roles.js";
 
 /**

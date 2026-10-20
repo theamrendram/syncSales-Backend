@@ -1,4 +1,4 @@
-import prisma from "../utils/prismaClient.js";
+import prisma from "../utils/core/prismaClient.js";
 import { isKeyRole, isNarrowedRole } from "../lib/org-roles.js";
 import { rotateApiKey, revokeApiKey, visibleApiKey } from "../lib/api-keys.js";
 import {

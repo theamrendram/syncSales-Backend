@@ -1,4 +1,4 @@
-import prismaClient from "../utils/prismaClient.js";
+import prismaClient from "../utils/core/prismaClient.js";
 
 const addWebhook = async (req, res) => {
   const { name, url, method, attributes } = req.body;

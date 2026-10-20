@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PERMISSIONS, toPermissionList } from "../lib/org-roles.js";
+import { PERMISSIONS, toPermissionList } from "../../lib/org-roles.js";
 
 /**
  * Validation for a stored `Role.permissions` value.

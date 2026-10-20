@@ -1,4 +1,4 @@
-import prisma from "../utils/prismaClient.js";
+import prisma from "../utils/core/prismaClient.js";
 import { syncApiKeyForRole } from "../lib/api-keys.js";
 import { isNarrowedRole } from "../lib/org-roles.js";
 import { getMemberGrants, hasAnyGrant } from "../lib/member-grants.js";

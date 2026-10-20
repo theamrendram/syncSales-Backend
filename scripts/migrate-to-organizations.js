@@ -1,5 +1,5 @@
 import { pathToFileURL } from "url";
-import { migrateExistingUsersToOrganizations, checkMigrationStatus, validateOrganizationIntegrity } from "../src/utils/migration-helper.js";
+import { migrateExistingUsersToOrganizations, checkMigrationStatus, validateOrganizationIntegrity } from "../src/utils/legacy/migration-helper.js";
 
 async function runMigration() {
   try {

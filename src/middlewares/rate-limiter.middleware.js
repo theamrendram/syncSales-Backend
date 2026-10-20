@@ -1,5 +1,5 @@
 import { rateLimit } from "express-rate-limit";
-import { logLeadOutcome, fingerprintApiKey } from "../utils/lead-log.js";
+import { logLeadOutcome, fingerprintApiKey } from "../utils/leads/lead-log.js";
 
 const getRequestApiKey = (req) => {
   const bodyKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";

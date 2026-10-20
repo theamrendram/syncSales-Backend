@@ -1,6 +1,6 @@
 import { validate as uuidValidate } from "uuid";
-import prisma from "../utils/prismaClient.js";
-import logger from "../utils/logger.js";
+import prisma from "../utils/core/prismaClient.js";
+import logger from "../utils/core/logger.js";
 import {
   PERMISSIONS,
   isKnownRole,

@@ -1,4 +1,4 @@
-import prisma from "./prismaClient.js";
+import prisma from "../core/prismaClient.js";
 
 /**
  * Explicit resource grants, and what they narrow a member to.

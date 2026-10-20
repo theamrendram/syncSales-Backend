@@ -1,4 +1,4 @@
-import prismaClient from "../utils/prismaClient.js";
+import prismaClient from "../utils/core/prismaClient.js";
 import { isUsableApiKey, rotateApiKey, visibleApiKey } from "../lib/api-keys.js";
 import { DEFAULT_ROLE } from "../lib/org-roles.js";
 

@@ -1,5 +1,5 @@
 import axios from "axios";
-import { logLeadWebhook } from "./lead-log.js";
+import { logLeadWebhook } from "../leads/lead-log.js";
 
 const sendWebhook = async (route, lead, log) => {
   const startedAt = Date.now();

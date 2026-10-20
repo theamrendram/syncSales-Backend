@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import logger from "./logger.js";
+import logger from "../core/logger.js";
 
 const MAX_LOGGED_STRING = 120;
 

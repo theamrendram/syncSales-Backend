@@ -1,8 +1,8 @@
-import prismaClient from "../utils/prismaClient.js";
-import { decodePublicOrgLeadId } from "../utils/org-lead-id.js";
-import { resolveApiKeyPrincipal } from "../utils/api-key-principal.js";
-import { LEAD_STATUSES, normalizeLeadStatus } from "../utils/lead-status.js";
-import { getGrantedLeadScope } from "../utils/resource-grants.js";
+import prismaClient from "../utils/core/prismaClient.js";
+import { decodePublicOrgLeadId } from "../utils/leads/org-lead-id.js";
+import { resolveApiKeyPrincipal } from "../utils/auth/api-key-principal.js";
+import { LEAD_STATUSES, normalizeLeadStatus } from "../utils/leads/lead-status.js";
+import { getGrantedLeadScope } from "../utils/access/resource-grants.js";
 
 /**
  * Status update for one lead, authenticated by API key.

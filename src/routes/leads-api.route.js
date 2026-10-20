@@ -1,8 +1,8 @@
 import { addLead, addLeadGet } from "../controllers/leads-api.controller.js";
 import { LeadsLimiter } from "../middlewares/rate-limiter.middleware.js";
-import { checkUserPlan } from "../utils/check-user-plan.js";
-import { requestTiming } from "../utils/request-timer.js";
-import { leadRequestLogger } from "../utils/lead-log.js";
+import { checkUserPlan } from "../utils/auth/check-user-plan.js";
+import { requestTiming } from "../utils/http/request-timer.js";
+import { leadRequestLogger } from "../utils/leads/lead-log.js";
 import express from "express";
 const router = express.Router();
 

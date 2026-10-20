@@ -16,7 +16,15 @@ Backend for SyncSales, a lead-management SaaS for media buyers. Express 4 + Pris
 - `src/app.js`: middleware order, CORS, route mounting, global error handler
 - `src/routes/*.route.js`: thin; wires permission middleware to controllers
 - `src/controllers/*.controller.js`: request handling and business logic (there is no services layer)
-- `src/utils/`: shared logic (`prismaClient.js` singleton, `logger.js`, lead scope/insights, API-key principal)
+- `src/utils/`: shared logic, grouped by area. New utils go in the matching folder, not the `utils/` root:
+  - `core/`: `prismaClient.js` singleton, `logger.js`, `log-serializers.js`, `process-guards.js`
+  - `http/`: client IP, request timing middleware
+  - `auth/`: API-key principal, `checkUserPlan` middleware, key generation
+  - `access/`: row scope (`scope.js`, `lead-scope.js`), resource grants, role permissions schema, default org roles
+  - `leads/`: duplicate check, statuses, public lead ids, lead outcome logging
+  - `analytics/`: chart functions, lead insights
+  - `webhooks/`: outbound webhook delivery
+  - `legacy/`: unused or one-off code (`organization-utils`, `migration-helper`, `util-for-json-to-csv`). Don't import from here in new code
 - `src/lib/auth.js`: Better Auth instance (org plugin, Google OAuth, email hooks). `lib/org-roles.js`, `lib/email/`
 - `src/middlewares/`: `require-auth` (session), `authentication-context` (org context + `requireOrgPermission`), `rate-limiter`
 - `src/config/env.js`: `config` object + `validateEnv()`
@@ -34,9 +42,9 @@ Backend for SyncSales, a lead-management SaaS for media buyers. Express 4 + Pris
 ## Conventions
 - Controllers: `async (req, res)` wrapped in try/catch, returning `res.status(n).json(...)`. The global handler returns 500 `{ message }`.
 - Response shape: success is `{ success: true, data, meta? }`. Errors are `{ error: "msg" }`. Match this in new code.
-- Validation: mostly manual field checks. zod is available and used in `utils/role-permissions-schema.js`.
-- Logging: pino. Use `req.log` inside requests and `import logger from "utils/logger.js"` elsewhere, with structured objects first: `logger.info({ id }, "msg")`. No `console.log` in new code. Redaction is configured in `logger.js`. Don't log credentials.
-- Prisma: import the singleton from `utils/prismaClient.js` and never call `new PrismaClient()`. Use explicit `select` objects and cap list sizes (e.g. `limit` ≤ 500).
+- Validation: mostly manual field checks. zod is available and used in `utils/access/role-permissions-schema.js`.
+- Logging: pino. Use `req.log` inside requests and `import logger from "utils/core/logger.js"` elsewhere, with structured objects first: `logger.info({ id }, "msg")`. No `console.log` in new code. Redaction is configured in `logger.js`. Don't log credentials.
+- Prisma: import the singleton from `utils/core/prismaClient.js` and never call `new PrismaClient()`. Use explicit `select` objects and cap list sizes (e.g. `limit` ≤ 500).
 - Files: kebab-case with a `.controller.js` / `.route.js` / `.middleware.js` suffix. Code uses camelCase.
 - Env vars: SCREAMING_SNAKE, documented in `.env.example`. Required vars go in `validateEnv()`.
 

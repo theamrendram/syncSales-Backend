@@ -1,5 +1,5 @@
-import prismaClient from "../utils/prismaClient.js";
-import logger from "../utils/logger.js";
+import prismaClient from "../utils/core/prismaClient.js";
+import logger from "../utils/core/logger.js";
 import { requireScope } from "../middlewares/scope.middleware.js";
 
 const ROUTE_REQUIRED_FIELDS = ["name", "product", "description", "payout"];
