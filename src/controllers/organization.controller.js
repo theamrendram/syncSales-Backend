@@ -13,6 +13,7 @@ import {
   replaceGrants,
   GRANT_TX_OPTIONS,
 } from "../lib/member-grants.js";
+import { assertSeatAvailable } from "../lib/member-limit.js";
 
 // Create a new organization
 const createOrganization = async (req, res) => {
@@ -256,6 +257,18 @@ const addMember = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "User is already a member of this organization",
+      });
+    }
+
+    // Same plan cap as invitations (src/lib/member-limit.js).
+    try {
+      await assertSeatAvailable(organizationId, { includePending: true });
+    } catch (err) {
+      if (err?.body?.code !== "MEMBER_LIMIT_REACHED") throw err;
+      return res.status(403).json({
+        success: false,
+        code: err.body.code,
+        message: err.body.message,
       });
     }
 

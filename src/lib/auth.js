@@ -26,6 +26,7 @@ import { ac, PLUGIN_ROLES, ASSIGNABLE_ROLES } from "./org-access-control.js";
 import { DEFAULT_ORG_ROLES } from "../utils/access/default-org-roles.js";
 import { upsertMembership } from "./membership.js";
 import { assertMemberAuthAllowed, getMemberAuthPolicy } from "./member-auth-policy.js";
+import { assertSeatAvailable } from "./member-limit.js";
 
 const APP_URL = process.env.NODE_ENV === "production" ? process.env.APP_URL : "http://localhost:3000";
 const CRM_URL = process.env.NODE_ENV === "production" ? process.env.CRM_URL : "http://localhost:3001";
@@ -350,6 +351,10 @@ export const auth = betterAuth({
             });
           }
 
+          // The plan caps members besides the owner, and a pending invitation
+          // holds a seat (src/lib/member-limit.js). Resends never reach here.
+          await assertSeatAvailable(invitation.organizationId, { includePending: true });
+
           if (!roles.some(isNarrowedRole)) {
             return { data: { ...invitation, campaignIds: [], routeIds: [] } };
           }
@@ -392,6 +397,10 @@ export const auth = betterAuth({
               message: "You already belong to an organization",
             });
           }
+
+          // This invitation already holds its seat, so only members count. It
+          // still fails if the plan was downgraded while the invitation waited.
+          await assertSeatAvailable(organization.id, { includePending: false });
         },
 
         // The plugin writes the member row; the shared helper also fills
