@@ -116,6 +116,7 @@ export const auth = betterAuth({
 
   emailAndPassword: {
     enabled: true,
+    disableSignUp: true,
     requireEmailVerification: true,
     sendResetPassword: async ({ user, url }) => {
       // The endpoint answers the same whether or not an email goes out, so
@@ -137,7 +138,7 @@ export const auth = betterAuth({
     },
   },
 
-  emailVerification: {
+  emailVerification: {  
     sendOnSignUp: true,
     autoSignInAfterVerification: true,
     sendVerificationEmail: async ({ user, url }) => {
@@ -153,6 +154,7 @@ export const auth = betterAuth({
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      disableSignUp: true,
     },
   },
 
