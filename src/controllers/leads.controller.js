@@ -1,23 +1,20 @@
-const prismaClient = require("../utils/prismaClient");
-const { sendWebhook } = require("../utils/sendWebhook");
-const { checkDuplicateLead } = require("../utils/check-duplicate-lead");
-const getClientIp = require("../utils/get-client-ip");
-const {
-  chartMetrics,
-  generateExtendedReport,
-  transformLeadsToChartData,
-  getLeadsGroupedByDateRouteCampaign,
-} = require("../utils/chart-functions");
-const logger = require("../utils/logger");
-const {
-  logLeadOutcome,
-  fingerprintApiKey,
-  phoneLast4,
-} = require("../utils/lead-log");
-const { Parser } = require("json2csv");
-const {
-  getLeadScopeForWebmaster,
-} = require("../utils/webmaster-campaigns");
+import prismaClient from "../utils/core/prismaClient.js";
+import { sendWebhook } from "../utils/webhooks/sendWebhook.js";
+import { checkDuplicateLead } from "../utils/leads/check-duplicate-lead.js";
+import getClientIp from "../utils/http/get-client-ip.js";
+import { chartMetrics, generateExtendedReport, transformLeadsToChartData, getLeadsGroupedByDateRouteCampaign } from "../utils/analytics/chart-functions.js";
+import logger from "../utils/core/logger.js";
+import { logLeadOutcome, fingerprintApiKey, phoneLast4 } from "../utils/leads/lead-log.js";
+import { Parser } from "json2csv";
+import { resolveLeadScope } from "../utils/access/lead-scope.js";
+import { findInScope, scopeFor } from "../utils/access/scope.js";
+import { LEAD_STATUSES, normalizeLeadStatus } from "../utils/leads/lead-status.js";
+import { isKeyRole } from "../lib/org-roles.js";
+import { isUsableApiKey } from "../lib/api-keys.js";
+import {
+  getGrantedLeadScope,
+  hasResourceGrants,
+} from "../utils/access/resource-grants.js";
 
 const MAX_PAGE_LIMIT = 100;
 const MAX_EXPORT_LIMIT = 1000;
@@ -51,46 +48,31 @@ const getUserWithMemberships = async (userId) =>
     select: {
       id: true,
       email: true,
-      webmasterProfile: { select: { userId: true } },
       organizationMemberships: {
-        where: { status: "active" },
-        select: {
+          select: {
           organizationId: true,
-          role: { select: { name: true, permissions: true } },
+          role: true,
         },
       },
     },
   });
 
+/**
+ * Lead access for the list/export endpoints that predate withScope().
+ *
+ * Delegates each organization to scopeFor() in src/utils/access/scope.js, so these
+ * endpoints narrow exactly as the scoped ones do — including advertisers and
+ * publishers, who see nothing until something is assigned. With no
+ * organization, it is the union of the caller's organizations, each scoped.
+ */
 const getLeadAccessWhereForUser = async (user, organizationId) => {
-  if (user.webmasterProfile) {
-    if (!organizationId) {
-      return { where: null, isEmpty: true };
-    }
-    const { campaignIds, routeIds } = await getLeadScopeForWebmaster(
-      user.id,
-      organizationId,
-    );
-    if (!campaignIds.length && !routeIds.length) {
-      return { where: null, isEmpty: true };
-    }
-    return {
-      where: {
-        organizationId,
-        OR: [
-          ...(campaignIds.length ? [{ campaignId: { in: campaignIds } }] : []),
-          ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
-        ],
-      },
-      isEmpty: false,
-    };
-  }
+  const roleByOrg = new Map(
+    user.organizationMemberships.map((m) => [m.organizationId, m.role]),
+  );
 
+  let orgIds;
   if (organizationId) {
-    const membership = user.organizationMemberships.find(
-      (m) => m.organizationId === organizationId,
-    );
-    if (!membership) {
+    if (!roleByOrg.has(organizationId)) {
       const org = await prismaClient.organization.findUnique({
         where: { id: organizationId },
         select: { ownerId: true },
@@ -99,23 +81,34 @@ const getLeadAccessWhereForUser = async (user, organizationId) => {
         return { where: null, isForbidden: true };
       }
     }
-    return { where: { organizationId }, isEmpty: false };
+    orgIds = [organizationId];
+  } else {
+    const ownedOrgs = await prismaClient.organization.findMany({
+      where: { ownerId: user.id },
+      select: { id: true },
+    });
+    orgIds = [...new Set([...roleByOrg.keys(), ...ownedOrgs.map((o) => o.id)])];
   }
 
-  const membershipOrgIds = user.organizationMemberships.map(
-    (m) => m.organizationId,
+  const scopes = await Promise.all(
+    orgIds.map((orgId) =>
+      scopeFor({
+        userId: user.id,
+        organizationId: orgId,
+        role: roleByOrg.get(orgId) ?? null,
+        resource: "lead",
+      }),
+    ),
   );
-  const ownedOrgs = await prismaClient.organization.findMany({
-    where: { ownerId: user.id },
-    select: { id: true },
-  });
-  const ownedOrgIds = ownedOrgs.map((o) => o.id);
-  const orgIds = Array.from(new Set([...membershipOrgIds, ...ownedOrgIds]));
+  const wheres = scopes.filter((sc) => sc.ok && !sc.empty).map((sc) => sc.where);
 
-  if (!orgIds.length) {
+  if (!wheres.length) {
     return { where: null, isEmpty: true };
   }
-  return { where: { organizationId: { in: orgIds } }, isEmpty: false };
+  return {
+    where: wheres.length === 1 ? wheres[0] : { OR: wheres },
+    isEmpty: false,
+  };
 };
 
 const getLeads = async (req, res) => {
@@ -140,14 +133,6 @@ const getLeads = async (req, res) => {
       queryOrganizationId != null &&
       String(queryOrganizationId).trim() !== ""
     ) {
-      if (ctx.isWebmaster) {
-        if (
-          !ctx.organizationId ||
-          String(queryOrganizationId) !== ctx.organizationId
-        ) {
-          return res.status(403).json({ error: "Forbidden" });
-        }
-      }
       if (
         !ctx.organizationId ||
         String(queryOrganizationId) !== ctx.organizationId
@@ -163,45 +148,21 @@ const getLeads = async (req, res) => {
     );
     const skip = (pageNumber - 1) * take;
 
-    let scopeWhere = {};
-    if (ctx.isWebmaster) {
-      if (!ctx.organizationId) {
-        return res.status(403).json({
-          error: "Forbidden",
-          message: "No organization context",
-        });
-      }
-      const { campaignIds: ids, routeIds } = await getLeadScopeForWebmaster(
-        ctx.userId,
-        ctx.organizationId,
-      );
-      if (!ids.length && !routeIds.length) {
-        return res.json({
-          leads: [],
-          total: 0,
-          page: pageNumber,
-          limit: take,
-        });
-      }
-      scopeWhere = {
-        organizationId: ctx.organizationId,
-        OR: [
-          ...(ids.length ? [{ campaignId: { in: ids } }] : []),
-          ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
-        ],
-      };
-    } else {
-      if (!ctx.organizationId) {
-        return res.status(403).json({
-          error: "Forbidden",
-          message: "No organization context",
-        });
-      }
-      scopeWhere = { organizationId: ctx.organizationId };
+    // The shared resolver decides which leads this member may see; a member with
+    // explicit grants is narrowed to them, everyone else to their organization.
+    const scope = await resolveLeadScope(req);
+    if (!scope.ok) {
+      return res.status(scope.status).json({ error: scope.error });
     }
+    if (scope.empty) {
+      return res.json({ leads: [], total: 0, page: pageNumber, limit: take });
+    }
+    const scopeWhere = scope.where;
 
-    const where = {
-      ...scopeWhere,
+    // Filters sit beside the scope under AND, never spread into it: the
+    // search's OR would otherwise replace the scope's own OR (the grant
+    // narrowing) and return every lead in the organization.
+    const filters = {
       ...(search && {
         OR: [
           { firstName: { contains: search, mode: "insensitive" } },
@@ -230,6 +191,7 @@ const getLeads = async (req, res) => {
           },
         }),
     };
+    const where = { AND: [scopeWhere, filters] };
 
     // Get total count for pagination
     const total = await prismaClient.lead.count({ where });
@@ -305,23 +267,18 @@ const addLead = async (req, res) => {
     const ip = getClientIp(req);
     const country = "IN";
 
+    // Legacy "0"/"nokey_" values are not keys and must never match a row.
     // Get user and campaign in a single query with organization context
-    const userWithCampaign = await prismaClient.user.findUnique({
+    const userWithCampaign = isUsableApiKey(apiKey) && await prismaClient.user.findUnique({
       where: { apiKey },
       select: {
         id: true,
-        webmasterProfile: {
-          select: { isActive: true },
-        },
+        isActive: true,
+        ownedOrganization: { select: { id: true } },
         organizationMemberships: {
-          where: { status: "active" },
-          select: {
-            organizationId: true,
-            role: {
               select: {
-                permissions: true,
-              },
-            },
+            organizationId: true,
+            role: true,
           },
         },
         ownedCampaigns: {
@@ -341,7 +298,7 @@ const addLead = async (req, res) => {
             },
           },
         },
-        webmasterCampaignMemberships: {
+        campaignGrants: {
           where: {
             campaign: { campId },
           },
@@ -378,7 +335,7 @@ const addLead = async (req, res) => {
 
     const campaign =
       userWithCampaign.ownedCampaigns[0] ||
-      userWithCampaign.webmasterCampaignMemberships[0]?.campaign;
+      userWithCampaign.campaignGrants[0]?.campaign;
     if (!campaign) {
       logLeadOutcome(req, {
         ...logFields,
@@ -392,17 +349,24 @@ const addLead = async (req, res) => {
     logFields.routeId = campaign.routeId;
     logFields.organizationId = campaign.organizationId;
 
-    if (userWithCampaign.webmasterProfile) {
-      if (!userWithCampaign.webmasterProfile.isActive) {
-        logLeadOutcome(req, {
-          ...logFields,
-          outcome: "webmaster_inactive",
-          status: 403,
-          actorUserId: userWithCampaign.id,
-        });
-        return res.status(403).json({ error: "Webmaster account is inactive" });
-      }
-      if (!userWithCampaign.webmasterCampaignMemberships[0]) {
+    if (!userWithCampaign.isActive) {
+      logLeadOutcome(req, {
+        ...logFields,
+        outcome: "member_inactive",
+        status: 403,
+        actorUserId: userWithCampaign.id,
+      });
+      return res.status(403).json({ error: "Account is inactive" });
+    }
+
+    // A member with campaign grants must have one for this campaign. A member
+    // with none is checked against the organization instead, below.
+    const hasGrants = await hasResourceGrants(
+      userWithCampaign.id,
+      campaign.organizationId,
+    );
+    if (hasGrants) {
+      if (!userWithCampaign.campaignGrants[0]) {
         logLeadOutcome(req, {
           ...logFields,
           outcome: "campaign_access_denied",
@@ -429,6 +393,35 @@ const addLead = async (req, res) => {
           .status(403)
           .json({ error: "Access denied to this organization" });
       }
+    }
+
+    // Only the owner, advertisers and publishers hold usable keys. An admin or
+    // manager may still have a key from before roles decided this; refuse it.
+    const keyRole = userWithCampaign.organizationMemberships.find(
+      (membership) => membership.organizationId === campaign.organizationId,
+    )?.role;
+    const isOrgOwnerKey =
+      userWithCampaign.ownedOrganization?.id === campaign.organizationId;
+    if (!isOrgOwnerKey && !isKeyRole(keyRole)) {
+      logLeadOutcome(req, {
+        ...logFields,
+        outcome: "key_role_denied",
+        status: 403,
+        actorUserId: userWithCampaign.id,
+      });
+      return res.status(403).json({ error: "This API key cannot send leads" });
+    }
+
+    // Advertisers and publishers send only to campaigns assigned to them, even
+    // when they hold no grants at all; only the owner's key is organization-wide.
+    if (!isOrgOwnerKey && !userWithCampaign.campaignGrants[0]) {
+      logLeadOutcome(req, {
+        ...logFields,
+        outcome: "campaign_access_denied",
+        status: 403,
+        actorUserId: userWithCampaign.id,
+      });
+      return res.status(403).json({ error: "Access denied to this campaign" });
     }
 
     // Check for duplicate lead
@@ -671,11 +664,12 @@ const getLeadsByUserPagination = async (req, res) => {
     if (access.isEmpty) {
       return res.json({ data: [], total: 0, page: pageNumber, totalPages: 0 });
     }
-    const where = { ...access.where };
+    // AND, not a spread: see getLeads.
+    const filters = {};
 
     // Search filter
     if (search) {
-      where.OR = [
+      filters.OR = [
         { firstName: { contains: search, mode: "insensitive" } },
         { lastName: { contains: search, mode: "insensitive" } },
         { phone: { contains: search, mode: "insensitive" } },
@@ -685,7 +679,7 @@ const getLeadsByUserPagination = async (req, res) => {
 
     // Status filter
     if (status && status !== "all") {
-      where.status = { equals: status, mode: "insensitive" };
+      filters.status = { equals: status, mode: "insensitive" };
     }
 
     // Campaign filter (comma-separated ids)
@@ -695,7 +689,7 @@ const getLeadsByUserPagination = async (req, res) => {
         .map((id) => String(id).trim())
         .filter(Boolean);
       if (ids.length) {
-        where.campaignId = { in: ids };
+        filters.campaignId = { in: ids };
       }
     }
 
@@ -704,9 +698,11 @@ const getLeadsByUserPagination = async (req, res) => {
       const fromDate = new Date(String(from));
       const toDate = new Date(String(to));
       if (!Number.isNaN(fromDate.getTime()) && !Number.isNaN(toDate.getTime())) {
-        where.createdAt = { gte: fromDate, lte: toDate };
+        filters.createdAt = { gte: fromDate, lte: toDate };
       }
     }
+
+    const where = { AND: [access.where, filters] };
 
     const total = await prismaClient.lead.count({ where });
 
@@ -787,10 +783,11 @@ const downloadLeadsCsv = async (req, res) => {
       );
     }
 
-    const where = { ...access.where };
+    // AND, not a spread: see getLeads.
+    const filters = {};
 
     if (search) {
-      where.OR = [
+      filters.OR = [
         { firstName: { contains: search, mode: "insensitive" } },
         { lastName: { contains: search, mode: "insensitive" } },
         { phone: { contains: search, mode: "insensitive" } },
@@ -799,7 +796,7 @@ const downloadLeadsCsv = async (req, res) => {
     }
 
     if (status && status !== "all") {
-      where.status = { equals: status, mode: "insensitive" };
+      filters.status = { equals: status, mode: "insensitive" };
     }
 
     if (campaignIds) {
@@ -808,7 +805,7 @@ const downloadLeadsCsv = async (req, res) => {
         .map((id) => String(id).trim())
         .filter(Boolean);
       if (ids.length) {
-        where.campaignId = { in: ids };
+        filters.campaignId = { in: ids };
       }
     }
 
@@ -816,9 +813,11 @@ const downloadLeadsCsv = async (req, res) => {
       const fromDate = new Date(String(from));
       const toDate = new Date(String(to));
       if (!Number.isNaN(fromDate.getTime()) && !Number.isNaN(toDate.getTime())) {
-        where.createdAt = { gte: fromDate, lte: toDate };
+        filters.createdAt = { gte: fromDate, lte: toDate };
       }
     }
+
+    const where = { AND: [access.where, filters] };
 
     const exportLimit = Math.min(
       Math.max(Number(limit) || MAX_EXPORT_LIMIT, 1),
@@ -876,35 +875,16 @@ const getMonthlyLeadsByUser = async (req, res) => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(now.getDate() - 30);
 
-    if (ctx?.isWebmaster) {
-      const { campaignIds, routeIds } = await getLeadScopeForWebmaster(
-        userId,
-        ctx.organizationId,
-      );
-      if (!campaignIds.length && !routeIds.length) return res.json([]);
-
-      where = {
-        organizationId: ctx.organizationId,
-        OR: [
-          ...(campaignIds.length ? [{ campaignId: { in: campaignIds } }] : []),
-          ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
-        ],
-        createdAt: {
-          gte: thirtyDaysAgo,
-          lte: now,
-        },
-      };
-    } else if (ctx?.organizationId) {
-      where = {
-        organizationId: ctx.organizationId,
-        createdAt: {
-          gte: thirtyDaysAgo,
-          lte: now,
-        },
-      };
-    } else {
-      return res.status(403).json({ error: "Unauthorized" });
+    const scope = await resolveLeadScope(req);
+    if (!scope.ok) {
+      return res.status(scope.status).json({ error: scope.error });
     }
+    if (scope.empty) return res.json([]);
+
+    where = {
+      ...scope.where,
+      createdAt: { gte: thirtyDaysAgo, lte: now },
+    };
 
     const leads = await prismaClient.lead.findMany({
       where,
@@ -966,35 +946,16 @@ const getPastTenDaysLeadsByUser = async (req, res) => {
     tenDaysAgo.setDate(now.getDate() - 10);
     const nowTime = new Date();
 
-    if (ctx?.isWebmaster) {
-      const { campaignIds, routeIds } = await getLeadScopeForWebmaster(
-        userId,
-        ctx.organizationId,
-      );
-      if (!campaignIds.length && !routeIds.length) return res.json([]);
-
-      where = {
-        organizationId: ctx.organizationId,
-        OR: [
-          ...(campaignIds.length ? [{ campaignId: { in: campaignIds } }] : []),
-          ...(routeIds.length ? [{ routeId: { in: routeIds } }] : []),
-        ],
-        createdAt: {
-          gte: tenDaysAgo,
-          lte: nowTime,
-        },
-      };
-    } else if (ctx?.organizationId) {
-      where = {
-        organizationId: ctx.organizationId,
-        createdAt: {
-          gte: tenDaysAgo,
-          lte: nowTime,
-        },
-      };
-    } else {
-      return res.status(403).json({ error: "Unauthorized" });
+    const scope = await resolveLeadScope(req);
+    if (!scope.ok) {
+      return res.status(scope.status).json({ error: scope.error });
     }
+    if (scope.empty) return res.json([]);
+
+    where = {
+      ...scope.where,
+      createdAt: { gte: tenDaysAgo, lte: nowTime },
+    };
 
     const exportLimit = Math.min(
       Math.max(Number(req.query.limit) || 500, 1),
@@ -1042,12 +1003,43 @@ const getPastTenDaysLeadsByUser = async (req, res) => {
   }
 };
 
-module.exports = {
-  getLeads,
-  addLead,
-  getLeadsByUser,
-  getLeadsByUserPagination,
-  downloadLeadsCsv,
-  getMonthlyLeadsByUser,
-  getPastTenDaysLeadsByUser,
+/**
+ * Change a lead's status from the dashboard.
+ *
+ * Status is the only field the dashboard edits, so it is the only one accepted.
+ * This replaced PUT /api/v1/leads/update, which sat on the public router with no
+ * authentication and passed the request body straight to Prisma.
+ */
+const updateLeadStatus = async (req, res) => {
+  const { id } = req.params;
+  const status = normalizeLeadStatus(req.body?.status);
+  if (!status) {
+    return res.status(400).json({ error: "Invalid status", valid_statuses: LEAD_STATUSES });
+  }
+
+  try {
+    const scope = await resolveLeadScope(req);
+    if (!scope.ok) {
+      return res.status(scope.status).json({ error: scope.error });
+    }
+
+    const lead = await findInScope(prismaClient.lead, scope, id, { id: true });
+    if (!lead) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
+
+    const updated = await prismaClient.lead.update({
+      where: { id: lead.id },
+      data: { status },
+      select: { id: true, status: true, updatedAt: true },
+    });
+
+    req.log.info({ evt: "lead_update", leadId: id, status }, "lead status updated");
+    return res.status(200).json({ success: true, data: updated });
+  } catch (err) {
+    req.log.error({ evt: "lead_update", leadId: id, err }, "lead status update failed");
+    return res.status(500).json({ error: "Failed to update lead" });
+  }
 };
+
+export { getLeads, addLead, updateLeadStatus, getLeadsByUser, getLeadsByUserPagination, downloadLeadsCsv, getMonthlyLeadsByUser, getPastTenDaysLeadsByUser };

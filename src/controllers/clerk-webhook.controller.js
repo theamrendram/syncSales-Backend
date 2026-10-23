@@ -1,7 +1,6 @@
-const prisma = require("../utils/prismaClient");
-const { Webhook } = require("svix");
-const logger = require("../utils/logger");
-const { generateKey } = require("../utils/generate-key");
+import prisma from "../utils/core/prismaClient.js";
+import { Webhook } from "svix";
+import logger from "../utils/core/logger.js";
 
 // Handle Clerk webhook events
 const handleClerkWebhook = async (req, res) => {
@@ -89,7 +88,6 @@ async function handleUserCreated(data) {
         email,
         firstName: data.first_name || "",
         lastName: data.last_name || "",
-        apiKey: generateKey(),
       },
     });
 
@@ -163,4 +161,4 @@ async function handleUserDeleted(data) {
   }
 }
 
-module.exports = { handleClerkWebhook };
+export { handleClerkWebhook };

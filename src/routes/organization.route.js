@@ -1,17 +1,11 @@
-const express = require("express");
-const multer = require("multer");
-const path = require("path");
+import { requireOrgPermission } from "../middlewares/authentication-context.middleware.js";
+import express from "express";
+import multer from "multer";
+import path from "path";
 const router = express.Router();
 
-const {
-  createOrganization,
-  getUserOrganizations,
-  getOrganization,
-  updateOrganization,
-  getMembers,
-  addMember,
-  removeMember,
-} = require("../controllers/organization.controller");
+import { getMemberAccess, setMemberAccess, getMemberApiKey, rotateMemberApiKey, revokeMemberApiKey } from "../controllers/member-access.controller.js";
+import { createOrganization, getUserOrganizations, getOrganization, updateOrganization, getMembers, addMember, removeMember, updateMemberAuthSettings, getCurrentOrganization, updateMemberRole } from "../controllers/organization.controller.js";
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -38,12 +32,25 @@ const upload = multer({
 // Organization CRUD
 router.post("/", createOrganization);
 router.get("/user", getUserOrganizations);
+// Before "/:organizationId" so "current" is not read as an id.
+router.get("/current", getCurrentOrganization);
 router.get("/:organizationId", getOrganization);
-router.put("/:organizationId", updateOrganization);
+router.put("/:organizationId", requireOrgPermission("organization:manage"), updateOrganization);
+// Owner-only; the controller checks isOrganizationOwner directly so the rule
+// does not drift if organization:manage is ever granted to another role.
+router.put("/:organizationId/auth-settings", updateMemberAuthSettings);
 
 // Member management
-router.get("/:organizationId/members", getMembers);
-router.post("/:organizationId/members", addMember);
-router.delete("/:organizationId/members/:memberId", removeMember);
+router.get("/:organizationId/members", requireOrgPermission("member:manage"), getMembers);
+router.patch("/:organizationId/members/:memberId", requireOrgPermission("member:manage"), updateMemberRole);
+router.post("/:organizationId/members", requireOrgPermission("member:manage"), addMember);
+router.delete("/:organizationId/members/:memberId", requireOrgPermission("member:manage"), removeMember);
 
-module.exports = router;
+// What an advertiser or publisher sees, and their API keys.
+router.get("/:organizationId/members/:memberId/access", requireOrgPermission("member:manage"), getMemberAccess);
+router.put("/:organizationId/members/:memberId/access", requireOrgPermission("member:manage"), setMemberAccess);
+router.get("/:organizationId/members/:memberId/api-key", requireOrgPermission("apikey:manage"), getMemberApiKey);
+router.post("/:organizationId/members/:memberId/api-key", requireOrgPermission("apikey:manage"), rotateMemberApiKey);
+router.delete("/:organizationId/members/:memberId/api-key", requireOrgPermission("apikey:manage"), revokeMemberApiKey);
+
+export default router;

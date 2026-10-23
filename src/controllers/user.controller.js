@@ -1,6 +1,6 @@
-const prismaClient = require("../utils/prismaClient");
-const { generateKey } = require("../utils/generate-key");
-const { clerkClient } = require("@clerk/express");
+import prismaClient from "../utils/core/prismaClient.js";
+import { isUsableApiKey, rotateApiKey, visibleApiKey } from "../lib/api-keys.js";
+import { DEFAULT_ROLE } from "../lib/org-roles.js";
 
 const userSelect = {
   id: true,
@@ -16,77 +16,16 @@ const userSelect = {
   organizationId: true,
 };
 
-const userApiKeySelect = {
-  id: true,
-  apiKey: true,
-};
 const addUser = async (req, res) => {
-  const { firstName, lastName, email, password = "", companyName } = req.body;
-
-  console.log("req.body", req.body);
-  if (!firstName || !lastName || !email || !password) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
-  try {
-    const userExists = await prismaClient.user.findUnique({
-      where: {
-        email: email,
-      },
-    });
-
-    if (userExists) {
-      return res
-        .status(400)
-        .json({ error: "User already exists with this email" });
-    }
-
-    const clerkUser = await clerkClient.users.createUser({
-      username: email.split("@")[0].replace(/\./g, ""),
-      emailAddress: [email],
-      password,
-      firstName,
-      lastName,
-      deleteSelfEnabled: false,
-    });
-
-    console.log("clerkUser", clerkUser);
-
-    const user = await prismaClient.user.create({
-      data: {
-        id: clerkUser.id,
-        firstName,
-        lastName,
-        email,
-        password,
-        companyName,
-        apiKey:
-          Math.random().toString(36).substring(2, 15) +
-          Math.random().toString(36).substring(2, 15),
-      },
-    });
-    res.status(201).json(user);
-  } catch (error) {
-    console.log(error);
-    // Clerk errors come with `errors` array
-    if (error.errors && Array.isArray(error.errors)) {
-      return res.status(400).json({
-        error: "ClerkError",
-        details: error.errors.map((e) => ({
-          code: e.code,
-          message: e.message,
-          longMessage: e.longMessage,
-          meta: e.meta,
-        })),
-      });
-    }
-
-    // Fallback for other errors
-    res.status(500).json({
-      error: "Unable to create user",
-      details: error.message,
-    });
-  }
+  // Registration is owned by Better Auth (`POST /api/auth/sign-up/email`) and
+  // by the organization plugin's invitation flow. This handler used to create
+  // an identity-provider user plus a User row carrying a live apiKey, and it
+  // was additionally mounted unauthenticated at /api/v1/user/create — an open
+  // account-creation endpoint. It stays only to answer callers still pointing
+  // at the old path.
+  return res.status(403).json({ error: "Signups are currently disabled" });
 };
+
 
 const getAllUsers = async (req, res) => {
   try {
@@ -99,38 +38,47 @@ const getAllUsers = async (req, res) => {
   }
 };
 
+/**
+ * Issues a key for the caller when they have none.
+ *
+ * The owner only. Advertiser and publisher keys are issued with their role and
+ * rotated by the owner or an admin (member-access.controller.js); admins and
+ * managers hold none.
+ */
 const addUserAPI = async (req, res) => {
   const { userId } = req.auth;
   try {
     const user = await prismaClient.user.findUnique({
-      where: {
-        id: userId,
+      where: { id: userId },
+      select: {
+        apiKey: true,
+        organizationMemberships: { select: { role: true }, take: 1 },
+        ownedOrganization: { select: { id: true } },
       },
-      select: userApiKeySelect,
     });
     if (!user) {
       return res.status(400).json({ error: "User not found" });
     }
 
-    if (user.apiKey) {
+    const role = user.ownedOrganization
+      ? "owner"
+      : user.organizationMemberships?.[0]?.role;
+    if (role !== "owner") {
+      return res
+        .status(403)
+        .json({ error: "API keys are issued by your organization's admin" });
+    }
+    if (isUsableApiKey(user.apiKey)) {
       return res.status(400).json({ error: "API key already exists" });
     }
 
-    const updatedUser = await prismaClient.user.update({
-      where: {
-        id: userId,
-      },
-      data: {
-        apiKey: generateKey(),
-      },
-      select: userApiKeySelect,
-    });
-    return res.status(200).json({ apiKey: updatedUser.apiKey });
+    const apiKey = await rotateApiKey(userId);
+    return res.status(200).json({ apiKey });
   } catch (error) {
-    console.log(error);
-    return res.status(500).json({ error: error });
+    req.log.error({ err: error }, "failed to issue API key");
+    return res.status(500).json({ error: "Failed to issue API key" });
   }
-};
+}
 
 const getUserAPI = async (req, res) => {
   const { userId } = req.auth;
@@ -141,8 +89,9 @@ const getUserAPI = async (req, res) => {
       },
       select: userSelect,
     });
-    console.log(user);
-    return res.status(200).json({ data: user });
+    return res.status(200).json({
+      data: user ? { ...user, apiKey: visibleApiKey(user.apiKey) } : user,
+    });
   } catch (error) {
     console.error("Error in getUserAPI:", error);
     return res
@@ -160,7 +109,7 @@ const getUser = async (req, res) => {
       },
       select: {
         ...userSelect,
-        webmasterProfile: { select: { userId: true } },
+        organizationMemberships: { select: { role: true }, take: 1 },
       },
     });
 
@@ -168,15 +117,21 @@ const getUser = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    const { webmasterProfile, ...userData } = user;
+    const { organizationMemberships, ...userData } = user;
 
-    // Same discriminator as resolveIsWebmaster() in
-    // authentication-context.middleware.js: a WebmasterProfile is what makes a
-    // user a webmaster. Everyone else is an admin — self-serve signups have no
-    // organization or membership until they create one, so any check based on
-    // those would misclassify them.
+    // The membership's own role, rather than the old admin|webmaster pair derived
+    // from a WebmasterProfile. One organization per user, so the single
+    // membership is the answer.
+    //
+    // Falls back to the least-privileged role, not the most: a self-serve signup
+    // has no membership until they create an organization, and defaulting that to
+    // "admin" — as this did — hands the UI a privilege the API would refuse.
+    // Optional chaining on the array too: a caller that selected the user without
+    // this relation must not turn into a 500 out of a role lookup.
+    const role = organizationMemberships?.[0]?.role ?? DEFAULT_ROLE;
+
     return res.status(200).json({
-      data: { ...userData, role: webmasterProfile ? "webmaster" : "admin" },
+      data: { ...userData, apiKey: visibleApiKey(userData.apiKey), role },
     });
   } catch (error) {
     console.error("Error in getUser:", error);
@@ -186,7 +141,7 @@ const getUser = async (req, res) => {
   }
 };
 
-module.exports = {
+export {
   addUser,
   getUser,
   getAllUsers,

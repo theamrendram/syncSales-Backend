@@ -1,7 +1,8 @@
-const {getSubscription} = require("../controllers/subscription.controller.js");
+import { getSubscription } from "../controllers/subscription.controller.js";
 
-const router = require("express").Router();
+import express from "express";
+const router = express.Router();
 
 router.post("/", getSubscription);
 
-module.exports = router
+export default router;

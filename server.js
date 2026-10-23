@@ -1,7 +1,9 @@
-const app = require("./src/app");
-const { config, validateEnv } = require("./src/config/env");
-const logger = require("./src/utils/logger");
-const { registerProcessGuards } = require("./src/utils/process-guards");
+import app from "./src/app.js";
+import { config, validateEnv } from "./src/config/env.js";
+import {verifyDatabaseConnection} from "./src/utils/core/prismaClient.js";
+import { verifyEmailTransport } from "./src/lib/email/index.js";
+import logger from "./src/utils/core/logger.js";
+import { registerProcessGuards } from "./src/utils/core/process-guards.js";
 
 validateEnv();
 registerProcessGuards();
@@ -25,4 +27,6 @@ if (config.memoryMonitorEnabled) {
 
 app.listen(config.port, () => {
   logger.info({ port: config.port }, "Server is running");
+  void verifyDatabaseConnection();
+  void verifyEmailTransport();
 });

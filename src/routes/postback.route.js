@@ -1,5 +1,5 @@
-const {addPostback} = require("../controllers/postback.controller")
-const express = require("express");
+import { addPostback } from "../controllers/postback.controller.js";
+import express from "express";
 const route = express.Router();
 
 
@@ -7,4 +7,4 @@ route.post("/", addPostback);
 route.get("/", addPostback);
 route.put("/", addPostback);
 
-module.exports = route;
+export default route;

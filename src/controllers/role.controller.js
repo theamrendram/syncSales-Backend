@@ -1,4 +1,7 @@
-const prisma = require("../utils/prismaClient");
+import prisma from "../utils/core/prismaClient.js";
+import { syncApiKeyForRole } from "../lib/api-keys.js";
+import { isNarrowedRole } from "../lib/org-roles.js";
+import { getMemberGrants, hasAnyGrant } from "../lib/member-grants.js";
 
 function assertRoleRouteContext(req, organizationId) {
   return (
@@ -83,7 +86,7 @@ const deleteRole = async (req, res) => {
 const updateMemberRole = async (req, res) => {
   try {
     const { organizationId, memberId } = req.params;
-    const { roleId } = req.body;
+    const { role: roleName, roleId } = req.body;
 
     if (!assertRoleRouteContext(req, organizationId)) {
       return res.status(403).json({
@@ -92,12 +95,6 @@ const updateMemberRole = async (req, res) => {
       });
     }
 
-    if (!req.authContext.permissions?.canManageMembers) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You do not have permission to manage members.",
-      });
-    }
 
     const member = await prisma.organizationMember.findFirst({
       where: {
@@ -115,7 +112,7 @@ const updateMemberRole = async (req, res) => {
 
     const newRole = await prisma.role.findFirst({
       where: {
-        id: roleId,
+        ...(roleName ? { name: roleName } : { id: roleId }),
         organizationId,
       },
     });
@@ -145,9 +142,21 @@ const updateMemberRole = async (req, res) => {
       });
     }
 
+    // An advertiser or publisher must already have access assigned; this
+    // endpoint takes none, so the members screen sends the grants with the role.
+    if (
+      isNarrowedRole(newRole.name) &&
+      !hasAnyGrant(await getMemberGrants(member.userId, organizationId))
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Assign at least one campaign or route",
+      });
+    }
+
     const updatedMember = await prisma.organizationMember.update({
       where: { id: memberId },
-      data: { roleId },
+      data: { role: newRole.name },
       include: {
         user: {
           select: {
@@ -157,9 +166,12 @@ const updateMemberRole = async (req, res) => {
             email: true,
           },
         },
-        role: true,
       },
     });
+
+    // Writes the role directly rather than through upsertMembership, so the key
+    // that goes with the role is synced here too.
+    await syncApiKeyForRole(member.userId, newRole.name);
 
     res.json({
       success: true,
@@ -176,10 +188,4 @@ const updateMemberRole = async (req, res) => {
   }
 };
 
-module.exports = {
-  createRole,
-  getRoles,
-  updateRole,
-  deleteRole,
-  updateMemberRole,
-};
+export { createRole, getRoles, updateRole, deleteRole, updateMemberRole };

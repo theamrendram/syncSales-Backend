@@ -1,5 +1,5 @@
-const prismaClient = require("../utils/prismaClient");
-const { getCampaignIdsForWebmaster } = require("../utils/webmaster-campaigns");
+import prismaClient from "../utils/core/prismaClient.js";
+import { requireScope } from "../middlewares/scope.middleware.js";
 
 const CAMPAIGN_MUTABLE_FIELDS = [
   "name",
@@ -53,29 +53,37 @@ const campaignSelect = {
   },
 };
 
+/**
+ * A publisher sees a campaign's route by name only. The route's url and method
+ * point at the client's CRM, which is not an outside lead source's business —
+ * see PUBLISHER_ROUTE_SELECT in route.controller.js.
+ */
+const campaignSelectFor = (req) =>
+  req.authContext?.membership?.role === "publisher"
+    ? {
+        ...campaignSelect,
+        route: { select: { id: true, name: true, product: true, payout: true } },
+      }
+    : campaignSelect;
+
 const getCampaigns = async (req, res) => {
   try {
     const take = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
-    const ctx = req.authContext;
+    const scope = requireScope(req);
+
+    // Entitled to nothing, which is an answer rather than a query.
+    if (scope.empty) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+        meta: { limit: take },
+      });
+    }
+
     const where = {
-      organizationId: req.organizationId,
+      ...scope.where,
       isArchived: false,
     };
-
-    if (ctx?.isWebmaster) {
-      const ids = await getCampaignIdsForWebmaster(
-        ctx.userId,
-        ctx.organizationId,
-      );
-      if (!ids.length) {
-        return res.status(200).json({
-          success: true,
-          data: [],
-          meta: { limit: take },
-        });
-      }
-      where.id = { in: ids };
-    }
 
     // Compatibility shape: allow ?userId=... but do not trust it for authorization.
     // If userId filter is requested, filter by the authenticated user only.
@@ -85,7 +93,7 @@ const getCampaigns = async (req, res) => {
 
     const campaigns = await prismaClient.campaign.findMany({
       where,
-      select: campaignSelect,
+      select: campaignSelectFor(req),
       orderBy: { createdAt: "desc" },
       take,
     });
@@ -107,27 +115,19 @@ const getCampaigns = async (req, res) => {
 const getCampaignById = async (req, res) => {
   const { id } = req.params;
   try {
-    const ctx = req.authContext;
-    if (ctx?.isWebmaster) {
-      const allowed = await getCampaignIdsForWebmaster(
-        ctx.userId,
-        ctx.organizationId,
-      );
-      if (!allowed.includes(id)) {
-        return res
-          .status(404)
-          .json({ success: false, error: "Campaign not found" });
-      }
-    }
+    const scope = requireScope(req);
 
-    const campaign = await prismaClient.campaign.findFirst({
-      where: {
-        id,
-        organizationId: req.organizationId,
-        isArchived: false,
-      },
-      select: campaignSelect,
-    });
+    // One query asks both questions: does it exist, and is it in scope. A row
+    // outside the scope is absent rather than forbidden — saying "forbidden"
+    // would confirm the id is real.
+    const campaign = scope.empty
+      ? null
+      : await prismaClient.campaign.findFirst({
+          // AND rather than a spread: a webmaster's scope constrains `id`
+          // itself, and merging would let it overwrite the id being requested.
+          where: { AND: [{ id }, scope.where, { isArchived: false }] },
+          select: campaignSelectFor(req),
+        });
 
     if (!campaign) {
       return res
@@ -293,10 +293,4 @@ const deleteCampaign = async (req, res) => {
     });
   }
 };
-module.exports = {
-  getCampaigns,
-  getCampaignById,
-  addCampaign,
-  editCampaign,
-  deleteCampaign,
-};
+export { getCampaigns, getCampaignById, addCampaign, editCampaign, deleteCampaign };

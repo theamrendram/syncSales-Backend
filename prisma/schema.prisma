@@ -10,17 +10,47 @@ datasource db {
 
 model User {
   id                      String               @id @default(uuid())
-  firstName               String
-  lastName                String
+  // Better Auth writes `name`, not these two. The defaults keep its inserts
+  // legal; databaseHooks.user.create.before in src/lib/auth.js splits `name`
+  // and fills them, so every row still carries real values.
+  firstName               String               @default("")
+  lastName                String               @default("")
   email                   String               @unique
-  password                String?
   companyName             String?
-  apiKey                  String               @unique @default("0")
+
+  // Better Auth identity fields. `name` is nullable because existing rows
+  // predate it and are backfilled from firstName + lastName; Better Auth
+  // always supplies it for new signups. The old plaintext `password` column
+  // is gone — credentials now live hashed in Account.password.
+  name                    String?
+  emailVerified           Boolean              @default(false)
+  image                   String?
+  // NULL for anyone who holds no key. Only the org owner, advertisers and
+  // publishers hold one (src/lib/api-keys.js); NULLs don't collide on the index.
+  apiKey                  String?              @unique
+
+  // Moved off WebmasterProfile, which is gone. These are member attributes, not
+  // a separate kind of account: isActive disables a member's API key without
+  // deleting them, and leadLimit/payout are per-member commercial terms.
+  isActive                Boolean              @default(true)
+  leadLimit               Int?
+  payout                  Float?
+
+  // Better Auth admin plugin. Platform-level, and deliberately distinct from
+  // the organization roles in src/lib/org-roles.js: this one decides who may
+  // impersonate, not what anyone can do inside an organization. Admin rights
+  // come from ADMIN_USER_IDS in the environment, so this column stays null and
+  // exists only because the plugin selects it.
+  role                    String?
+  banned                  Boolean              @default(false)
+  banReason               String?
+  banExpires              DateTime?
   createdAt               DateTime             @default(now())
   updatedAt               DateTime             @updatedAt
   address                 String?
   phone                   String?
   organizationId          String?
+  organization            Organization?        @relation("UserOrganization", fields: [organizationId], references: [id])
   ownedCampaigns          Campaign[]           @relation("CampaignOwner")
   leads                   Lead[]
   ownedOrganization       Organization?        @relation("Owner")
@@ -29,35 +59,47 @@ model User {
   routes                  Route[]
   subscription            Subscription[]
   userPlan                UserPlan?            @relation("UserToUserPlan")
-  webmasterProfile             WebmasterProfile?
-  webmasterCampaignMemberships CampaignWebmaster[] @relation("CampaignWebmasterMembership")
+  campaignGrants               CampaignWebmaster[] @relation("CampaignWebmasterMembership")
   resourceAccess               AccessControl[]
-}
 
-model WebmasterProfile {
-  userId    String   @id
-  isActive  Boolean  @default(true)
-  leadLimit Int?
-  payout    Float?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions                Session[]
+  accounts                Account[]
+  sentInvitations         Invitation[]         @relation("InvitationInviter")
 
-  @@index([isActive])
+  @@index([organizationId])
 }
 
 model Organization {
   id             String               @id @default(uuid())
   name           String
-  ownerId        String               @unique
+  // Nullable only so the organization plugin's INSERT is valid: it does not
+  // know about ownerId. beforeCreateOrganization sets it in the same call, and
+  // @unique still enforces one organization per owner.
+  ownerId        String?              @unique
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
   description    String?
   domain         String?
   logo           String?
+
+  // Required by the Better Auth organization plugin. Nullable so the migration
+  // applies to existing rows; Postgres permits many NULLs under a unique index,
+  // and the backfill assigns real slugs.
+  slug           String?              @unique
+  metadata       String?
+
+  // Whether members other than the owner may manage how they sign in. The
+  // owner always can. Enforced in src/lib/member-auth-policy.js, which every
+  // credential/Google account write goes through.
+  allowMemberPasswordManagement Boolean @default(false)
+  allowMemberSocialLinking      Boolean @default(false)
+
   campaigns      Campaign[]
   leads          Lead[]
-  owner          User                 @relation("Owner", fields: [ownerId], references: [id])
+  owner          User?                @relation("Owner", fields: [ownerId], references: [id])
+  // Users whose User.organizationId points here (their active organization).
+  // Membership itself lives in OrganizationMember.
+  users          User[]               @relation("UserOrganization")
   members        OrganizationMember[]
   payments       Payment[]
   Role           Role[]
@@ -66,6 +108,8 @@ model Organization {
   userPlans      UserPlan[]
   orgLeadCounter OrgLeadCounter?
   resourceAccess AccessControl[]
+
+  invitations    Invitation[]
 
   @@index([ownerId])
 }
@@ -84,7 +128,6 @@ model Role {
   organizationId String
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
-  members        OrganizationMember[]
   organization   Organization         @relation(fields: [organizationId], references: [id])
 
   @@unique([name, organizationId])
@@ -95,18 +138,24 @@ model OrganizationMember {
   id             String       @id @default(uuid())
   userId         String
   organizationId String
-  roleId         String
-  status         MemberStatus @default(active)
+  // A Role.name within this organization, not a foreign key. Role is
+  // @@unique([name, organizationId]) so the pair identifies a role row exactly as
+  // well as an id did, and storing the name is what lets the Better Auth
+  // organization plugin read this table directly — it expects a role name.
+  //
+  // Deliberately not an FK: the plugin writes role names of its own (its default
+  // is "member"), and a constraint would turn that into a failed insert rather
+  // than a role that simply grants nothing. permissionsForRole() already falls
+  // back to the least-privileged role for an unknown name, which fails closed.
+  role           String       @default("advertiser")
   joinedAt       DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id])
-  role           Role         @relation(fields: [roleId], references: [id])
   user           User         @relation(fields: [userId], references: [id])
 
   @@unique([userId, organizationId])
   @@index([userId])
   @@index([organizationId])
-  @@index([roleId])
 }
 
 model UserPlan {
@@ -329,9 +378,98 @@ enum Status {
   inactive
 }
 
-enum MemberStatus {
-  active
-  inactive
-  pending
-  suspended
+// ---------------------------------------------------------------------------
+// Better Auth
+//
+// Session/Account/Verification are the core identity tables. Invitation belongs
+// to the organization plugin.
+//
+// The plugin has no membership table of its own: src/lib/auth.js points its
+// `member` model at OrganizationMember, which is why that table stores the role
+// as a *name* rather than a foreign key — the plugin expects a name. One table
+// serves both the plugin and the permission layer.
+//
+// Permissions are not stored on the membership. OrganizationMember.role names a
+// Role row within the same organization (Role is @@unique([name, organizationId])),
+// and that row carries the resource:action grants.
+// ---------------------------------------------------------------------------
+
+model Session {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Set by the organization plugin so the active org travels with the session
+  // instead of costing a lookup on every request.
+  activeOrganizationId String?
+
+  // Set by the admin plugin when this session was created by impersonation.
+  // Holds the admin's user id, and is the only record that a session is not
+  // really the user acting — treat it as the audit trail.
+  impersonatedBy       String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Account {
+  id                    String    @id @default(uuid())
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  // Hashed by Better Auth. Replaces the old plaintext User.password column.
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id @default(uuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@index([expiresAt])
+}
+
+model Invitation {
+  id             String   @id @default(uuid())
+  organizationId String
+  email          String
+  role           String   @default("advertiser")
+  status         String   @default("pending")
+  // Access an advertiser or publisher gets when the invitation is accepted.
+  // Applied by afterAcceptInvitation in src/lib/auth.js; empty for other roles.
+  campaignIds    String[] @default([])
+  routeIds       String[] @default([])
+  expiresAt      DateTime
+  inviterId      String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inviter      User         @relation("InvitationInviter", fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([email])
 }

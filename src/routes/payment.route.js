@@ -1,8 +1,9 @@
-const { createSubscription, verifySubscription } = require("../controllers/payment.controller.js");
+import { createSubscription, verifySubscription } from "../controllers/payment.controller.js";
 
-const router = require("express").Router();
+import express from "express";
+const router = express.Router();
 
 router.post("/subscribe", createSubscription);
 router.post("/verify", verifySubscription)
 
-module.exports = router;
+export default router;

@@ -1,5 +1,5 @@
-const rateLimiter = require("express-rate-limit");
-const { logLeadOutcome, fingerprintApiKey } = require("../utils/lead-log");
+import { rateLimit } from "express-rate-limit";
+import { logLeadOutcome, fingerprintApiKey } from "../utils/leads/lead-log.js";
 
 const getRequestApiKey = (req) => {
   const bodyKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
@@ -22,7 +22,7 @@ const createLeadsLimiter = ({
   limit = parsePositiveInt(process.env.LEADS_RATE_LIMIT, 60),
   windowMs = parsePositiveInt(process.env.LEADS_RATE_WINDOW_MS, 60_000),
 } = {}) =>
-  rateLimiter.rateLimit({
+  rateLimit({
     windowMs,
     limit,
     standardHeaders: "draft-8",
@@ -61,7 +61,32 @@ const createLeadsLimiter = ({
 
 const LeadsLimiter = createLeadsLimiter();
 
-const LeadsDownloadLimiter = rateLimiter.rateLimit({
+// Per-authenticated-user key; falls back to the client IP.
+const userOrIpKey = (req) => {
+  const userId = req.auth?.userId || req.authContext?.userId;
+  if (userId) return String(userId);
+
+  const forwardedFor = req.headers["x-forwarded-for"];
+  const normalizedIp = Array.isArray(forwardedFor)
+    ? forwardedFor[0]
+    : typeof forwardedFor === "string"
+      ? forwardedFor.split(",")[0].trim()
+      : req.ip || req.socket?.remoteAddress;
+
+  return normalizedIp || "anonymous";
+};
+
+// Seconds until the caller's window resets, for the Retry-After header.
+const secondsUntilReset = (req, windowMs) => {
+  const resetTime = req.rateLimit?.resetTime
+    ? new Date(req.rateLimit.resetTime).getTime()
+    : null;
+  return resetTime != null
+    ? Math.max(1, Math.ceil((resetTime - Date.now()) / 1000))
+    : Math.ceil(windowMs / 1000);
+};
+
+const LeadsDownloadLimiter = rateLimit({
   windowMs: 30_000,
   limit: 1,
   standardHeaders: "draft-8",
@@ -70,12 +95,7 @@ const LeadsDownloadLimiter = rateLimiter.rateLimit({
     trustProxy: false,
   },
   handler: (req, res, next, options) => {
-    const resetTime = req.rateLimit?.resetTime
-      ? new Date(req.rateLimit.resetTime).getTime()
-      : null;
-    const now = Date.now();
-    const retryAfterSeconds =
-      resetTime != null ? Math.max(1, Math.ceil((resetTime - now) / 1000)) : 30;
+    const retryAfterSeconds = secondsUntilReset(req, options.windowMs);
 
     res.setHeader("Retry-After", String(retryAfterSeconds));
     return res.status(options.statusCode).json({
@@ -84,24 +104,42 @@ const LeadsDownloadLimiter = rateLimiter.rateLimit({
       retryAfterSeconds,
     });
   },
-  keyGenerator: (req) => {
-    // Per-authenticated-user rate limiting for downloads; fallback to IP.
-    const userId = req.auth?.userId || req.authContext?.userId;
-    if (userId) return String(userId);
-
-    const forwardedFor = req.headers["x-forwarded-for"];
-    const normalizedIp = Array.isArray(forwardedFor)
-      ? forwardedFor[0]
-      : typeof forwardedFor === "string"
-        ? forwardedFor.split(",")[0].trim()
-        : req.ip || req.socket?.remoteAddress;
-
-    return normalizedIp || "anonymous";
-  },
+  keyGenerator: userOrIpKey,
 });
 
-module.exports = {
+/**
+ * One route test request per user every 10 seconds. Each test makes the server
+ * call an arbitrary URL, so this caps how hard one account can drive that.
+ * Mounted after body validation, so a rejected payload does not use up the window.
+ */
+const createWebhookTestLimiter = ({ windowMs = 10_000, limit = 1 } = {}) =>
+  rateLimit({
+    windowMs,
+    limit,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    validate: {
+      trustProxy: false,
+    },
+    handler: (req, res, next, options) => {
+      const retryAfterSeconds = secondsUntilReset(req, options.windowMs);
+
+      req.log?.info({ retryAfterSeconds }, "Webhook test rate limited");
+      res.setHeader("Retry-After", String(retryAfterSeconds));
+      return res.status(options.statusCode).json({
+        error: `You can send one test request every ${Math.round(options.windowMs / 1000)} seconds. Try again in ${retryAfterSeconds}s.`,
+        retryAfterSeconds,
+      });
+    },
+    keyGenerator: userOrIpKey,
+  });
+
+const WebhookTestLimiter = createWebhookTestLimiter();
+
+export {
   LeadsLimiter,
   LeadsDownloadLimiter,
   createLeadsLimiter,
+  WebhookTestLimiter,
+  createWebhookTestLimiter,
 };

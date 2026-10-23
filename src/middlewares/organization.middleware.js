@@ -1,4 +1,4 @@
-const prisma = require("../utils/prismaClient");
+import prisma from "../utils/core/prismaClient.js";
 
 // Middleware to check if user is member of organization
 const requireOrganizationMembership = async (req, res, next) => {
@@ -23,7 +23,6 @@ const requireOrganizationMembership = async (req, res, next) => {
       where: {
         userId,
         organizationId,
-        status: "active",
       },
       include: {
         role: true,
@@ -151,7 +150,6 @@ const getUserOrganizations = async (userId) => {
     const memberships = await prisma.organizationMember.findMany({
       where: {
         userId,
-        status: "active",
       },
       include: {
         organization: {
@@ -163,13 +161,7 @@ const getUserOrganizations = async (userId) => {
             logo: true,
           },
         },
-        role: {
-          select: {
-            id: true,
-            name: true,
-            permissions: true,
-          },
-        },
+        role: true,
       },
     });
 
@@ -186,7 +178,6 @@ const hasPermissionInAnyOrganization = async (userId, permission) => {
     const memberships = await prisma.organizationMember.findMany({
       where: {
         userId,
-        status: "active",
       },
       include: {
         role: true,
@@ -202,11 +193,4 @@ const hasPermissionInAnyOrganization = async (userId, permission) => {
   }
 };
 
-module.exports = {
-  requireOrganizationMembership,
-  requirePermission,
-  requireOrganizationOwner,
-  addOrganizationContext,
-  getUserOrganizations,
-  hasPermissionInAnyOrganization,
-};
+export { requireOrganizationMembership, requirePermission, requireOrganizationOwner, addOrganizationContext, getUserOrganizations, hasPermissionInAnyOrganization };

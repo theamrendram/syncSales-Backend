@@ -1,13 +1,18 @@
-const express = require("express");
-const { randomUUID } = require("crypto");
-const dotenv = require("dotenv");
-dotenv.config();
-const cors = require("cors");
-const pinoHttp = require("pino-http");
-const { clerkMiddleware, requireAuth } = require("@clerk/express");
-const { config } = require("./config/env");
-const logger = require("./utils/logger");
-const { errSerializer } = require("./utils/log-serializers");
+// Must be first: ESM evaluates every import before this module's body runs, so
+// a dotenv.config() call down here would land after config/env.js has already
+// snapshotted process.env. The side-effect import keeps it in evaluation order.
+import "dotenv/config";
+
+import express from "express";
+import { randomUUID } from "crypto";
+import cors from "cors";
+import pinoHttp from "pino-http";
+import { requireAuth } from "./middlewares/require-auth.middleware.js";
+import { toNodeHandler } from "better-auth/node";
+import auth from "./lib/auth.js";
+import { config } from "./config/env.js";
+import logger from "./utils/core/logger.js";
+import { errSerializer } from "./utils/core/log-serializers.js";
 const app = express();
 app.disable("x-powered-by");
 app.set("query parser", "simple");
@@ -27,24 +32,20 @@ if (trustProxySetting === undefined) {
 }
 
 // Routes
-const campaignRoute = require("./routes/campaign.route");
-const chartRoute = require("./routes/chart.route");
-const clerkWebhookRoute = require("./routes/clerk-webhook.route");
-const leadsApiRoute = require("./routes/leads-api.route");
-const leadsRoute = require("./routes/leads.route");
-const organizationRoute = require("./routes/organization.route");
-const postbackRoute = require("./routes/postback.route");
-const roleRoute = require("./routes/role.route");
-const routeRoute = require("./routes/route.route");
-const sellerRoute = require("./routes/seller.route");
-const subscriptionRoute = require("./routes/subscription.route");
-const userRoute = require("./routes/user.route");
-const webhookRoute = require("./routes/webhook.route");
-const webmasterRoute = require("./routes/webmaster.route");
-const { addUser } = require("./controllers/user.controller");
-const {
-  authenticationContext,
-} = require("./middlewares/authentication-context.middleware");
+import campaignRoute from "./routes/campaign.route.js";
+import chartRoute from "./routes/chart.route.js";
+import clerkWebhookRoute from "./routes/clerk-webhook.route.js";
+import leadsApiRoute from "./routes/leads-api.route.js";
+import leadsRoute from "./routes/leads.route.js";
+import organizationRoute from "./routes/organization.route.js";
+import postbackRoute from "./routes/postback.route.js";
+import roleRoute from "./routes/role.route.js";
+import routeRoute from "./routes/route.route.js";
+import subscriptionRoute from "./routes/subscription.route.js";
+import userRoute from "./routes/user.route.js";
+import webhookRoute from "./routes/webhook.route.js";
+import { authenticationContext } from "./middlewares/authentication-context.middleware.js";
+import { withScope } from "./middlewares/scope.middleware.js";
 
 const organizationContextStrict = authenticationContext();
 const organizationContextOptional = authenticationContext({
@@ -89,8 +90,33 @@ app.use(
     },
   }),
 );
+const allowedOrigins = [
+  process.env.APP_URL || "http://localhost:3000",
+  process.env.CRM_URL || "http://localhost:3001",
+  ...(process.env.EXTRA_CORS_ORIGINS || "").split(",").map((o) => o.trim()),
+].filter(Boolean);
+
+const corsOptions = {
+  origin(origin, callback) {
+
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    logger.warn({ origin }, "origin not in CORS allowlist");
+    return callback(null, false);
+  },
+  credentials: true,
+};
+
+const publicCors = cors({ origin: "*", credentials: false });
+app.use("/api/v1/leads", publicCors);
+app.use("/api/v1/postback", publicCors);
+app.use("/webhook", publicCors);
+
+app.use(cors(corsOptions));
+
+app.all("/api/auth/*", toNodeHandler(auth));
+
 app.use(express.json({ limit: config.requestLimit }));
-app.use(cors());
 app.use(express.urlencoded({ extended: true, limit: config.requestLimit }));
 
 // leads api
@@ -106,29 +132,39 @@ app.get("/unauthenticated", (req, res) => {
   res.send("unauthenticated request");
 });
 
-app.use("/api/v1/user/create", addUser);
-app.use(clerkMiddleware());
+// requireAuth() resolves the Better Auth session per route. Clerk's
+// clerkMiddleware() used to sit here to populate req.auth for everything
 app.use("/api/v1/user", requireAuth(), userRoute);
 app.use(
   "/api/v1/routes",
   requireAuth(),
   organizationContextStrict,
+  withScope("route"),
   routeRoute,
 );
 app.use("/api/v1/webhook", requireAuth(), webhookRoute);
-app.use("/api/v1/seller", requireAuth(), sellerRoute);
 app.use(
   "/api/v1/campaigns",
   requireAuth(),
   organizationContextStrict,
+  withScope("campaign"),
   campaignRoute,
 );
-app.use("/api/v1/webmaster", requireAuth(), webmasterRoute);
-app.use("/api/v1/lead", requireAuth(), organizationContextOptional, leadsRoute);
+// organizationContextOptional here, so a request that resolves no organization
+// reaches the controller. withScope refuses it rather than scoping to nothing,
+// which is why the lead routes that genuinely allow no organization resolve their
+// own scope instead of mounting this.
+app.use(
+  "/api/v1/lead",
+  requireAuth(),
+  organizationContextOptional,
+  leadsRoute,
+);
 app.use(
   "/api/v1/chart",
   requireAuth(),
   organizationContextStrict,
+  withScope("lead"),
   chartRoute,
 );
 // Organization and role routes
@@ -153,4 +189,4 @@ app.use((err, req, res, next) => {
   res.status(500).json({ message: "Internal Server Error" });
 });
 
-module.exports = app;
+export default app;
