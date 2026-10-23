@@ -41,7 +41,7 @@ const BASE_URL = process.env.NODE_ENV === "production" ? process.env.BETTER_AUTH
  * grantable by a single UPDATE on a row — a database write should not be able
  * to escalate anyone to it. Empty by default: no list, no impersonation.
  */
-const ADMIN_USER_IDS = (process.env.NODE_ENV === "production" ? process.env.ADMIN_USER_IDS : "")
+const ADMIN_USER_IDS = ((process.env.NODE_ENV === "production" ? process.env.ADMIN_USER_IDS : "") || "")
   .split(",")
   .map((id) => id.trim())
   .filter(Boolean);
@@ -57,7 +57,7 @@ const ADMIN_USER_IDS = (process.env.NODE_ENV === "production" ? process.env.ADMI
  * Emails survive a reseed. Checking both means a stale entry in either list
  * denies rather than grants.
  */
-const ADMIN_EMAILS = (process.env.NODE_ENV === "production" ? process.env.ADMIN_EMAILS : "")
+const ADMIN_EMAILS = ((process.env.NODE_ENV === "production" ? process.env.ADMIN_EMAILS : "") || "")
   .split(",")
   .map((e) => e.trim().toLowerCase())
   .filter(Boolean);

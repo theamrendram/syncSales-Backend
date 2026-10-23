@@ -1,62 +1,40 @@
 /**
- * Server-side email.
+ * Server-side email, sent through Resend's HTTP API.
  *
  * Ported from home/src/lib/email/email-service.ts, which stayed in the
  * marketing app. Better Auth sends verification, password-reset and
  * organization-invitation mail from the API process, so the transport has to
  * live here.
+ *
+ * Render blocks outbound SMTP, so mail goes out over HTTPS rather than through
+ * an SMTP server.
  */
-import nodemailer from "nodemailer";
 import logger from "../../utils/core/logger.js";
 
-let transporter = null;
+const RESEND_API = "https://api.resend.com";
 
-/** True when no SMTP credentials are configured. */
-function smtpUnconfigured() {
-  return !process.env.SMTP_USER || !process.env.SMTP_PASS;
+/** True when no Resend API key is configured. */
+function resendUnconfigured() {
+  return !process.env.RESEND_API_KEY;
 }
 
-function getTransporter() {
-  if (transporter) return transporter;
-
-  // Without SMTP credentials, fall back to nodemailer's jsonTransport: it
-  // "sends" into an object instead of over the network. Verification and
-  // password-reset links then appear in the logs, so the auth flows are fully
-  // exercisable locally without a mail account. Refused outright in production,
-  // where silently not sending mail is worse than failing loudly.
-  if (smtpUnconfigured()) {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error(
-        "SMTP_USER and SMTP_PASS are required in production — refusing to start with a no-op mail transport",
-      );
-    }
-    logger.warn(
-      "SMTP not configured; using jsonTransport. Emails are logged, not delivered.",
-    );
-    transporter = nodemailer.createTransport({ jsonTransport: true });
-    return transporter;
-  }
-
-  transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || "smtp.gmail.com",
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: Number(process.env.SMTP_PORT) === 465,
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
+/**
+ * One call to the Resend API. Better Auth holds the request open for the send,
+ * and fetch on its own waits up to 5 minutes for response headers, so a stalled
+ * API would keep the sign-up or invite dialog spinning that long.
+ */
+async function resendRequest(path, init = {}) {
+  const res = await fetch(`${RESEND_API}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
     },
+    signal: AbortSignal.timeout(10_000),
   });
-
-  return transporter;
-}
-
-function stripHtml(html) {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  // Errors come back as { statusCode, name, message }; tolerate a non-JSON body.
+  const body = await res.json().catch(() => ({}));
+  return { res, body };
 }
 
 /**
@@ -65,40 +43,79 @@ function stripHtml(html) {
  * failed sign-up rather than silently creating an unverifiable account.
  */
 export async function sendEmail({ to, subject, html, text, replyTo }) {
-  const from =
-    process.env.SMTP_FROM || process.env.SMTP_USER || "noreply@syncsales.in";
+  // Without an API key nothing is sent; the action link is logged instead, so
+  // the auth flows are fully exercisable locally without a mail account.
+  // Refused outright in production, where silently not sending mail is worse
+  // than failing loudly.
+  if (resendUnconfigured()) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "RESEND_API_KEY is required in production — refusing to use a no-op mail transport",
+      );
+    }
+    const link = (html.match(/https?:\/\/[^\s"'<>]+/g) || [])[0];
+    logger.warn({ to, subject, link }, "email NOT delivered (no RESEND_API_KEY) — link logged");
+    return { success: true, messageId: null };
+  }
 
-  const info = await getTransporter().sendMail({
-    from,
-    to: Array.isArray(to) ? to.join(", ") : to,
-    subject,
-    html,
-    text: text || stripHtml(html),
-    replyTo,
+  const { res, body } = await resendRequest("/emails", {
+    method: "POST",
+    // Resend derives the plain-text part from `html` when `text` is omitted.
+    body: JSON.stringify({
+      from: process.env.EMAIL_FROM || "SyncSales <noreply@syncsales.in>",
+      to,
+      subject,
+      html,
+      text,
+      reply_to: replyTo || process.env.EMAIL_REPLY_TO || undefined,
+    }),
   });
 
-  if (smtpUnconfigured()) {
-    // The whole point of the dev transport: surface the action link, which is
-    // otherwise only reachable through a real inbox.
-    const link = (html.match(/https?:\/\/[^\s"'<>]+/g) || [])[0];
-    logger.warn({ to, subject, link }, "email NOT delivered (no SMTP) — link logged");
-  } else {
-    logger.info({ to, subject, messageId: info.messageId }, "email sent");
+  if (!res.ok) {
+    logger.error(
+      { to, subject, status: res.status, name: body.name, message: body.message },
+      "email send failed",
+    );
+    throw new Error(
+      `Resend ${res.status} ${body.name || "error"}: ${body.message || res.statusText}`,
+    );
   }
-  return { success: true, messageId: info.messageId };
+
+  logger.info({ to, subject, messageId: body.id }, "email sent");
+  return { success: true, messageId: body.id };
 }
 
 /**
- * Checks SMTP credentials without sending anything. Called at boot so a bad
+ * Checks the Resend API key without sending anything. Called at boot so a bad
  * mail config surfaces in the logs rather than on a user's first sign-up.
  */
 export async function verifyEmailTransport() {
-  try {
-    await getTransporter().verify();
-    logger.info("SMTP transport verified");
+  if (resendUnconfigured()) {
+    if (process.env.NODE_ENV === "production") {
+      logger.error("RESEND_API_KEY is not set; email cannot be sent");
+      return false;
+    }
+    logger.warn("RESEND_API_KEY not set; emails are logged, not delivered.");
     return true;
+  }
+
+  try {
+    const { res, body } = await resendRequest("/domains");
+    // Listing domains needs a full-access key. A sending-only key, which is
+    // what production should hold, gets 401 restricted_api_key: that still
+    // proves the key exists and is active. 403 restricted_api_key means the
+    // key is inactive.
+    if (res.ok || (res.status === 401 && body.name === "restricted_api_key")) {
+      logger.info("Resend API key verified");
+      return true;
+    }
+    logger.error(
+      { status: res.status, name: body.name, message: body.message },
+      "Resend API key verification failed",
+    );
+    return false;
   } catch (err) {
-    logger.error({ err }, "SMTP transport verification failed");
+    logger.error({ err }, "Resend API key verification failed");
     return false;
   }
 }
